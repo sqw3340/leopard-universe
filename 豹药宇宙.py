@@ -1,9 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 豹药宇宙 - 自走棋
-Changelog:
-  v1.2.8 检测更新与界面优化版
-    - 新增: 检测更新与自动更新功能（GitHub 更新源）
+- 新增: 检测更新与自动更新功能（GitHub 更新源）
     - 新增: 主菜单"检测更新"按钮
     - 新增: 更新弹窗（显示新版本号、更新日志、立即更新按钮）
     - 新增: 详情面板职业前显示"法术/物理"标签
@@ -38,6 +36,17 @@ Changelog:
     - 新增: 雷霆六人组 + 雷霆羁绊
     - 新增: 雷霆AI助手 (自动吐槽)
     - 修复: 雷霆技能与AI助手的缩进错误
+Changelog:
+  v1.2.9 完整版
+    - [X] A 类：羁绊阈值与棋子羁绊调整
+    - [X] B 类：财宝猎人收菜系统完整实现
+    - [X] C 类：豹灵符/药灵符/三神符转职系统
+    - [X] D 类：特殊装备系统
+    - [X] E 类：豹药神器
+    - [X] F 类：光明装备系统
+    - [X] G 类：三星五费设计
+    - [X] H 类：全局验收与修复
+    - [X] 转职限制：同一棋子禁止重复同类转职；原生同羁绊棋子禁止装备对应转职
 """
 import pygame
 import random
@@ -53,6 +62,7 @@ import pickle
 import time
 import urllib.request
 import json
+import re
 from collections import deque
 
 pygame.display.init()
@@ -146,12 +156,41 @@ DIFFICULTY_ORDER = ["easy", "normal", "hard", "extreme"]
 DIFFICULTY_COLOR = {"easy": (120, 220, 120), "normal": (110, 170, 240),
                      "hard": (255, 170, 60), "extreme": (230, 80, 80)}
 
-CURRENT_VERSION = "1.2.8"
+CURRENT_VERSION = "1.2.9"
 # 更新源：填你自己的远程 version.json 地址（GitHub raw 即可）
 # 留空 "" 则关闭检测更新
 UPDATE_CHECK_URL = "https://raw.githubusercontent.com/sqw3340/leopard-universe/main/version.json"
 
 CHANGELOG_TEXT = [
+    "v1.2.9  财宝秘境与全新宝物系统完整版",
+    "  · 新增 羁绊阈值全面调整：药剂族/豹族/蛙族/伐木/舞者/长老/雷霆/财宝猎人",
+    "  · 新增 财宝猎人收菜系统：藏宝碎片、层数、收宝离场、深入寻宝",
+    "  · 新增 财宝猎人第2-9层奖励池与高阶掠夺规则",
+    "  · 新增 8财宝棱彩捕获机制：战斗中捕获敌方弈子并获得藏宝碎片",
+    "  · 新增 豹灵符、药灵符及普通转职合成系统",
+    "  · 新增 豹灵符/药灵符与散件的差异化转职配方",
+    "  · 新增 豹药神符、肥豹神符、药烂神符三种神符",
+    "  · 新增 三神符套装效果：装备齐全后持续获得金币",
+    "  · 新增 财宝猎人转职特殊规则：不可普通合成，可通过收菜/昊天锤获得",
+    "  · 新增 转职装备限制：同一棋子禁止重复同类转职，原生同羁绊棋子禁止装备对应转职",
+    "  · 新增 昊天锤：可将装备/转职/灵符等特殊资源转换为其他资源",
+    "  · 新增 装备拆卸器：可拆卸棋子装备",
+    "  · 新增 大妮蔻：复制1星英雄",
+    "  · 新增 纹章之书：提供4个随机转职选择",
+    "  · 新增 光明宝箱：根据棋子推荐装备提供光明装备选择",
+    "  · 新增 杰作升级器：将普通成装升级为光明装备",
+    "  · 新增 12种豹药神器及对应战斗效果",
+    "  · 新增 光明装备系统：普通成装的强化版本与独立属性",
+    "  · 新增 三星五费强化与专属高光表现系统",
+    "  · 新增 1-1本局强化宝物获取途径：转职、灵符、神符、神器、光明装备及特殊道具",
+    "  · 新增 海克斯/强化符文宝物获取途径",
+    "  · 优化 宝物与强化符文资源分层获取，增加对局随机性与构筑选择",
+    "  · 新增 财宝猎人羁绊说明与收菜进度提示",
+    "  · 修复 特殊道具、掠夺规则、纹章之书、光明宝箱等系统之间的连接问题",
+    "  · 修复 转职特殊键名、装备类型与部分奖励生成问题",
+    "  · 修复 启动自检变量名错误及缺少 re 模块问题",
+    "  · 优化 全局自检与版本1.2.9功能验收",
+    "",
     "v1.2.8  检测更新与界面优化版",
     "  · 新增 检测更新与自动更新功能",
     "  · 新增 主菜单'检测更新'按钮",
@@ -363,6 +402,12 @@ def load_game(gs):
         gs.show_starter_popup = False
         gs.show_global_augment_popup = False
         gs.starter_chosen = True
+        gs.bounty_shards = 0
+        gs.bounty_layer_current = 1
+        gs.bounty_last_layer_seen = 1
+        gs.bounty_layer_options = []
+        gs.show_bounty_popup = False
+        gs._pending_plunder = None
         gs.phase_timer = PREP_DURATION
         gs.is_battle_phase = False
         gs.game_over = False
@@ -829,6 +874,16 @@ SND_BUY = gen_simple([523, 784], 0.13, 0.13)
 SND_ERROR = gen_simple([180], 0.12, 0.15)
 SND_COIN = gen_simple([1318, 1975], 0.1, 0.12)
 SND_VICTORY = gen_simple([523, 659, 784, 1047], 0.5, 0.12)
+# 三星五费专属音效：每个棋子使用不同音程组合。
+ULT_SFX_FREQS = {
+    "Dragon": [220, 330, 440, 660], "GuangTouQiang": [196, 247, 294, 392],
+    "BaoLan": [262, 330, 523, 784], "SuperLogger": [174, 220, 277, 349],
+    "GodFrog": [330, 415, 523, 659], "PotionCreator": [247, 311, 392, 622],
+    "ArcaneLord": [196, 294, 440, 587], "Tuanzi": [392, 494, 659, 988],
+    "ThunderPatch": [233, 311, 466, 932], "AncientVial": [185, 277, 370, 555],
+    "SwiftStrike": [294, 370, 554, 831],
+}
+SND_ULT = {k: gen_simple(v, 0.34, 0.16) for k, v in ULT_SFX_FREQS.items()}
 _sfx_cooldown = {k: 0.0 for k in
                  ("hit", "skill", "death", "sell", "hex",
                   "click", "buy", "error", "coin", "victory")}
@@ -843,6 +898,8 @@ def play_sfx(name):
            "sell": SND_SELL, "hex": SND_HEX, "click": SND_CLICK,
            "buy": SND_BUY, "error": SND_ERROR, "coin": SND_COIN,
            "victory": SND_VICTORY}.get(name)
+    if snd is None and name.startswith("ult_"):
+        snd = SND_ULT.get(name[4:])
     if snd:
         try:
             snd.play()
@@ -867,7 +924,12 @@ ITEMS = {
     "cloak": {"name": "负极斗篷", "stats": {"mr": 20}, "color": (140, 200, 220)},
     "glove": {"name": "拳套", "stats": {"crit": 0.20}, "color": (255, 220, 120)},
 }
-ITEM_IDS = list(ITEMS.keys())
+# 豹灵符/药灵符是新散件；合成神符由 COMBINE_TABLE 处理。
+ITEMS.update({
+    "leopard_talisman": {"name": "豹灵符", "stats": {"population": 1}, "color": (180, 90, 255)},
+    "potion_talisman": {"name": "药灵符", "stats": {"population": 1}, "color": (180, 90, 255)},
+})
+ITEM_IDS = [iid for iid in ITEMS.keys() if iid not in ("leopard_talisman", "potion_talisman")]
 
 COMBINE_TABLE = {
     frozenset(["sword", "sword"]): {"name": "无尽之刃", "stats": {"ad": 40, "crit": 0.30}, "color": (255, 180, 60)},
@@ -912,11 +974,102 @@ COMBINE_TABLE = {
     frozenset(["cloak", "glove"]): {"name": "水银", "stats": {"mr": 30, "crit": 0.20}, "color": (200, 220, 240)},
 }
 
+# 光明装备：普通成装的强化版本。无法由两件普通散件直接合成。
+RADIANT_ITEM_DATA = {}
+for _key, _data in COMBINE_TABLE.items():
+    if _key & {"leopard_talisman", "potion_talisman"}:
+        continue
+    _base_name = _data["name"]
+    _stats = dict(_data.get("stats", {}))
+    for _k, _v in list(_stats.items()):
+        if isinstance(_v, (int, float)) and _k != "population":
+            _stats[_k] = int(_v * 1.35) if isinstance(_v, int) else round(_v * 1.35, 3)
+    RADIANT_ITEM_DATA[_base_name] = {
+        "name": "光明" + _base_name,
+        "stats": _stats,
+        "color": (255, 225, 120),
+        "is_radiant": True,
+        "desc": "光明成装：普通成装强化版",
+    }
+
+def make_radiant_item(base_name):
+    d = RADIANT_ITEM_DATA.get(base_name)
+    if not d:
+        return None
+    return {
+        "id": "radiant_" + re.sub(r"\W+", "_", base_name),
+        "name": d["name"],
+        "stats": dict(d["stats"]),
+        "color": d["color"],
+        "is_combined": True,
+        "is_radiant": True,
+        "desc": d["desc"],
+    }
+
+def random_radiant_item():
+    if not RADIANT_ITEM_DATA:
+        return None
+    return make_radiant_item(random.choice(list(RADIANT_ITEM_DATA)))
+
+
+
+# 转职神符合成：豹灵符/药灵符通过两两合成获得三种神符。
+COMBINE_TABLE.update({
+    frozenset(["leopard_talisman", "potion_talisman"]): {
+        "name": "豹药神符", "stats": {"population": 1},
+        "color": (255, 180, 80), "rune_kind": "leopard_potion"},
+    frozenset(["leopard_talisman", "leopard_talisman"]): {
+        "name": "肥豹神符", "stats": {"population": 1},
+        "color": (255, 120, 180), "rune_kind": "fat_leopard"},
+    frozenset(["potion_talisman", "potion_talisman"]): {
+        "name": "药烂神符", "stats": {"population": 1},
+        "color": (120, 230, 140), "rune_kind": "rotten_potion"},
+})
+
+
+
+# 普通转职合成：灵符 + 散件。财宝猎人不进入此表，只能收菜或昊天锤转换。
+# 同一散件下，豹灵符与药灵符故意对应不同羁绊。
+EMBLEM_RECIPES = {
+    ("leopard_talisman", "sword"): "LeopardKind",
+    ("potion_talisman", "sword"): "PotionClan",
+    ("leopard_talisman", "bow"): "Dancer",
+    ("potion_talisman", "bow"): "LeopardKind",
+    ("leopard_talisman", "rod"): "Thunder",
+    ("potion_talisman", "rod"): "FrogTribe",
+    ("leopard_talisman", "tear"): "Elder",
+    ("potion_talisman", "tear"): "Lumber",
+    ("leopard_talisman", "belt"): "FrogTribe",
+    ("potion_talisman", "belt"): "Dancer",
+    ("leopard_talisman", "vest"): "Lumber",
+    ("potion_talisman", "vest"): "Elder",
+    ("leopard_talisman", "cloak"): "PotionClan",
+    ("potion_talisman", "cloak"): "Thunder",
+    ("leopard_talisman", "glove"): "BearRidge",
+    ("potion_talisman", "glove"): "RuneLand",
+}
+for (_a, _b), _trait in EMBLEM_RECIPES.items():
+    _result_name = trait_cn(_trait) + "纹章"
+    COMBINE_TABLE[frozenset([_a, _b])] = {
+        "name": _result_name, "stats": {},
+        "color": (220, 180, 80),
+        "is_emblem": True, "emblem_trait": _trait,
+    }
+
 
 def new_item(iid):
-    return {"id": iid, "name": ITEMS[iid]["name"],
+    item = {"id": iid, "name": ITEMS[iid]["name"],
             "stats": dict(ITEMS[iid]["stats"]), "color": ITEMS[iid]["color"],
             "is_combined": False}
+    if iid == "leopard_talisman":
+        item["is_rune"] = True
+        item["rune_kind"] = "leopard"
+        item["desc"] = RUNE_ITEM_DATA["leopard"]["desc"]
+    elif iid == "potion_talisman":
+        item["is_rune"] = True
+        item["rune_kind"] = "potion"
+        item["desc"] = RUNE_ITEM_DATA["potion"]["desc"]
+    return item
 
 
 def try_combine_items(items):
@@ -932,6 +1085,16 @@ def try_combine_items(items):
                 new_it = {"id": "combined_" + "_".join(sorted(key)),
                           "name": r["name"], "stats": dict(r["stats"]),
                           "color": r["color"], "is_combined": True}
+                if r.get("rune_kind"):
+                    new_it["rune_kind"] = r["rune_kind"]
+                    new_it["is_rune"] = True
+                    new_it["desc"] = RUNE_ITEM_DATA[r["rune_kind"]]["desc"]
+                if r.get("is_emblem"):
+                    new_it["is_emblem"] = True
+                    new_it["is_special"] = True
+                    new_it["special_kind"] = "emblem_generic"
+                    new_it["emblem_trait"] = r["emblem_trait"]
+                    new_it["desc"] = "装备后激活" + trait_cn(r["emblem_trait"]) + "羁绊。"
                 result = [it for k, it in enumerate(items) if k != i and k != j]
                 result.append(new_it)
                 return result, True
@@ -1172,7 +1335,55 @@ CHAMP_AUGMENT_THEMES = {
 }
 
 
+# v1.2.9 宝物型强化：参考金铲铲的强化符文/战利品思路，允许在开局强化中获得
+# 转职、灵符、神符、特殊道具、神器、光明装备等稀有资源。
+TREASURE_AUGMENTS = [
+    {"name": "纹章宝匣", "desc": "获得1个随机羁绊转职（不会获得财宝猎人转职）。", "reward": "emblem"},
+    {"name": "灵符宝匣", "desc": "获得1个豹灵符或药灵符。", "reward": "talisman"},
+    {"name": "神符宝匣", "desc": "获得1个随机神符。", "reward": "rune"},
+    {"name": "神器宝匣", "desc": "获得1件随机豹药神器。", "reward": "artifact"},
+    {"name": "光明锻造", "desc": "获得1件随机光明装备。", "reward": "radiant"},
+    {"name": "宝物工坊", "desc": "获得1个随机特殊道具：昊天锤、拆卸器、大妮蔻、光明宝箱或杰作升级器。", "reward": "special"},
+    {"name": "远古宝库", "desc": "随机获得一件高阶宝物。", "reward": "rare_bundle"},
+]
+
+def _make_augment_reward_item(kind):
+    if kind == "emblem":
+        traits = ["PotionClan", "LeopardKind", "FrogTribe", "Lumber", "Dancer", "Elder", "Thunder"]
+        return make_trait_emblem(random.choice(traits))
+    if kind == "talisman":
+        return make_rune_item(random.choice(["leopard", "potion"]))
+    if kind == "rune":
+        return make_rune_item(random.choice(["leopard_potion", "fat_leopard", "rotten_potion"]))
+    if kind == "artifact":
+        return make_artifact_item()
+    if kind == "radiant":
+        return random_radiant_item()
+    if kind == "special":
+        return make_special_item(random.choice(["haotian_hammer", "disassembler", "mega_neeko", "radiant_chest", "masterwork_upgrader"]))
+    if kind == "rare_bundle":
+        return random.choice([make_artifact_item(), random_radiant_item(), make_special_item("emblem_tome")])
+    return None
+
+def _grant_augment_reward(player, reward_kind):
+    item = _make_augment_reward_item(reward_kind)
+    if item is None:
+        return False
+    if len(player.get("items", [])) < MAX_ITEM_BENCH:
+        player.setdefault("items", []).append(item)
+    else:
+        player.setdefault("free_item_store", []).append(item)
+    return True
+
+
 def roll_global_augment():
+    # 大多数对局仍保持原有英雄主题强化；少量概率进入宝物型强化。
+    if random.random() < 0.28:
+        reward = random.choice(TREASURE_AUGMENTS)
+        return {"champ": None, "name": reward["name"], "desc": reward["desc"],
+                "reward": reward["reward"], "is_treasure_augment": True,
+                "hp_mult": 0.0, "atk_mult": 0.0, "sp_mult": 0.0,
+                "crit": 0.0, "atk_speed": 0.0, "armor": 0}
     key = random.choice(list(CHAMP_AUGMENT_THEMES.keys()))
     theme = CHAMP_AUGMENT_THEMES[key]
     return {
@@ -1202,9 +1413,389 @@ def apply_augment_to_player(player, aug):
         player["hex_list"] = []
     player["hex_list"].append({"name": aug["name"], "rarity": "prismatic",
                                 "desc": aug["desc"]})
+    if aug.get("is_treasure_augment"):
+        _grant_augment_reward(player, aug.get("reward"))
 
+
+
+LEOPARD_ARTIFACTS = {
+    "龙神丹": {"desc": "友方HP低于50%时获得一次强力治疗并短暂免伤。", "color": (255, 190, 80)},
+    "九天雷符": {"desc": "战斗开始眩晕全体敌人并施加易伤。", "color": (120, 180, 255)},
+    "玄冰镜": {"desc": "受击时反弹部分伤害并获得短暂护盾。", "color": (140, 220, 255)},
+    "火莲印": {"desc": "施放技能后在目标位置爆炸并持续灼烧。", "color": (255, 90, 60)},
+    "疾风靴": {"desc": "战斗开始获得极高攻速与移速，首次攻击必定暴击。", "color": (120, 255, 160)},
+    "辟邪玉": {"desc": "首次受到控制时免疫该控制并立即获得法力。", "color": (180, 220, 255)},
+    "聚宝盆": {"desc": "击杀获得金币，胜利时有概率获得藏宝碎片。", "color": (255, 215, 80)},
+    "噬魂幡": {"desc": "攻击低生命目标时造成额外真伤，击杀后回复生命。", "color": (190, 80, 120)},
+    "玲珑塔": {"desc": "定期为最低生命友军提供护盾并清除负面效果。", "color": (210, 170, 255)},
+    "豹骨甲": {"desc": "自身获得大量生命、护甲、魔抗，并为附近友军分摊伤害。", "color": (210, 170, 120)},
+    "诛仙弓": {"desc": "增加攻击距离，对当前最高生命敌人造成额外伤害。", "color": (255, 140, 140)},
+    "浑天仪": {"desc": "战斗开始使全体友军获得攻击、法强和攻速。", "color": (180, 130, 255)},
+}
+LEOPARD_ARTIFACT_NAMES = list(LEOPARD_ARTIFACTS)
+
+SPECIAL_ITEM_DATA = {
+    "emblem_treasure": ("财宝猎人纹章", "激活财宝猎人羁绊。"),
+    "emblem_lumber": ("伐木纹章", "激活伐木羁绊。"),
+    "disassembler": ("装备拆卸器", "无限次拆下目标英雄全部装备。"),
+    "haotian_hammer": ("昊天锤", "一次性随机重铸目标英雄的一件装备。"),
+    "masterwork_upgrader": ("杰作升级器", "将目标英雄的成装升级为光明版。"),
+    "mega_neeko": ("大妮蔻", "复制目标英雄的1星版本。"),
+    "radiant_chest": ("光明宝箱", "选择该英雄推荐成装的光明版，三选一。"),
+    "emblem_tome": ("纹章之书", "随机生成4个纹章供选择。"),
+    "artifact_forge": ("豹药神器锻造器", "随机获得一件豹药神器。"),
+}
+
+
+RUNE_ITEM_DATA = {
+    "leopard": {
+        "id": "leopard_talisman", "name": "豹灵符",
+        "desc": "与其他散件合成转职神符；装备后最大人口+1",
+    },
+    "potion": {
+        "id": "potion_talisman", "name": "药灵符",
+        "desc": "与其他散件合成转职神符；装备后最大人口+1",
+    },
+    "leopard_potion": {
+        "id": "leopard_potion_rune", "name": "豹药神符",
+        "desc": "豹灵符+药灵符；最大人口+1",
+    },
+    "fat_leopard": {
+        "id": "fat_leopard_rune", "name": "肥豹神符",
+        "desc": "豹灵符+豹灵符；最大人口+1",
+    },
+    "rotten_potion": {
+        "id": "rotten_potion_rune", "name": "药烂神符",
+        "desc": "药灵符+药灵符；最大人口+1",
+    },
+}
+
+
+def make_rune_item(kind):
+    data = RUNE_ITEM_DATA.get(kind, RUNE_ITEM_DATA["leopard"])
+    return {
+        "id": data["id"], "name": data["name"], "desc": data["desc"],
+        "stats": {"population": 1}, "color": (180, 90, 255),
+        "is_combined": kind not in ("leopard", "potion"),
+        "is_rune": True, "rune_kind": kind,
+    }
+
+
+def get_rune_items(unit):
+    return [it for it in unit.get("items", [])
+            if it.get("rune_kind") in RUNE_ITEM_DATA]
+
+
+def has_three_rune_set(unit):
+    kinds = {it.get("rune_kind") for it in get_rune_items(unit)}
+    return {"leopard_potion", "fat_leopard", "rotten_potion"} <= kinds
+
+
+def apply_rune_set_gold(player):
+    total = 0
+    for row in player.get("board", []):
+        for unit in row:
+            if unit is not None and has_three_rune_set(unit):
+                total += 4
+    return total
+
+
+BOUNTY_SHARD_GAIN = {
+    3: (2, 3), 4: (2, 4), 5: (3, 5),
+    6: (4, 7), 7: (4, 7), 8: (4, 7),
+}
+
+
+def _bounty_gain(treasure_cnt, won):
+    if treasure_cnt < 3:
+        return 0
+    use = max(k for k in BOUNTY_SHARD_GAIN if treasure_cnt >= k)
+    w, l = BOUNTY_SHARD_GAIN[use]
+    return w if won else l
+
+
+def _bounty_item(item_id, name, desc="", stats=None):
+    return {
+        "id": item_id, "name": name,
+        "desc": desc, "stats": dict(stats or {}),
+        "color": TREASURE_COLOR, "is_combined": False,
+        "is_special": True,
+        "special_kind": item_id if item_id in SPECIAL_ITEM_DATA else None,
+    }
+
+
+def _bounty_reward_options(layer):
+    # Each layer is a pool of 3-5 complete reward bundles. One bundle is
+    # randomly selected when the layer is reached.
+    return {
+        2: [
+            {"name": "散件", "desc": "随机 1 件散件", "items": [("base", 1)]},
+            {"name": "昊天锤", "desc": "一次性随机重铸装备", "items": [("special", "haotian_hammer", "昊天锤", "敲击装备后随机重铸")]},
+            {"name": "金币", "desc": "+10 金币", "gold": 10},
+        ],
+        3: [
+            {"name": "散件+5金+6金", "desc": "随机散件 +11 金币", "items": [("base", 1)], "gold": 11},
+            {"name": "成装+7金+昊天锤", "desc": "随机成装 +7金币 +昊天锤",
+             "items": [("combined", 1), ("special", "haotian_hammer", "昊天锤", "敲击装备后随机重铸")], "gold": 7},
+            {"name": "2散件+4金", "desc": "2 件散件 +4金币", "items": [("base", 2)], "gold": 4},
+            {"name": "随机豹药神器+昊天锤", "desc": "随机豹药神器 + 昊天锤",
+             "items": [("artifact_random", 1), ("special", "haotian_hammer", "昊天锤", "敲击装备后随机重铸")]},
+        ],
+        4: [
+            {"name": "豹药神器+成装+6金", "desc": "随机豹药神器 + 成装 +6金币",
+             "items": [("artifact_random", 1), ("combined", 1)], "gold": 6},
+            {"name": "3成装", "desc": "3 件随机成装", "items": [("combined", 3)]},
+            {"name": "纹章之书+4金+2散件", "desc": "纹章之书 +4金币 +2散件",
+             "items": [("tome", 1), ("base", 2)], "gold": 4},
+            {"name": "4×10金", "desc": "+40 金币", "gold": 40},
+        ],
+        5: [
+            {"name": "8法球+豹药神符", "desc": "8 个法球 + 豹药神符",
+             "items": [("orb", 8), ("rune", "leopard_potion") ]},
+            {"name": "4金+装备+2纹章之书", "desc": "+4金币 +随机装备 +2纹章之书",
+             "items": [("random_item", 1), ("tome", 2)], "gold": 4},
+            {"name": "6散件+杰作升级器", "desc": "6散件 + 杰作升级器",
+             "items": [("base", 6), ("special", "masterwork_upgrader", "杰作升级器", "将成装升级为光明版")]},
+            {"name": "5金×4+54金", "desc": "+74金币", "gold": 74},
+            {"name": "光明装备+豹药神器锻造器+3散件+昊天锤+拆卸器",
+             "desc": "光明装备 + 豹药神器锻造器 +3散件 +昊天锤 +拆卸器",
+             "items": [("radiant_random", 1), ("special", "artifact_forge", "豹药神器锻造器", "后续用于获得豹药神器"),
+                       ("base", 3), ("special", "haotian_hammer", "昊天锤", "敲击装备后随机重铸"),
+                       ("special", "disassembler", "装备拆卸器", "无限次拆卸装备")]},
+        ],
+        6: [
+            {"name": "2散件+3成装+64金", "desc": "2散件 +3成装 +64金币",
+             "items": [("base", 2), ("combined", 3)], "gold": 64},
+            {"name": "财宝猎人纹章+豹药神符×2+8法球", "desc": "财宝猎人纹章 +2豹药神符 +8法球",
+             "items": [("special", "emblem_treasure", "财宝猎人纹章", "激活财宝猎人羁绊"),
+                       ("rune", "leopard_potion"), ("rune", "leopard_potion"), ("orb", 8)]},
+            {"name": "7金+7金+100金+7金+7金", "desc": "+128金币", "gold": 128},
+            {"name": "光明宝箱+大妮蔻+30金×2+20金", "desc": "光明宝箱 + 大妮蔻 +80金币",
+             "items": [("special", "radiant_chest", "光明宝箱", "开出推荐成装的光明版，3选1"),
+                       ("special", "mega_neeko", "大妮蔻", "复制1个1星英雄")], "gold": 80},
+        ],
+        7: [
+            {"name": "光明宝箱+伐木纹章+2星伐木5费卡+3星其余伐木弈子",
+             "desc": "光明宝箱 + 伐木纹章 + 2星伐木5费卡 + 3星其余伐木弈子",
+             "items": [("special", "radiant_chest", "光明宝箱", "开出推荐成装的光明版，3选1"),
+                       ("special", "emblem_lumber", "伐木纹章", "激活伐木羁绊"),
+                       ("champion_bundle", 1)]},
+            {"name": "财宝猎人纹章+50金×2+6散件", "desc": "财宝猎人纹章 +100金币 +6散件",
+             "items": [("special", "emblem_treasure", "财宝猎人纹章", "激活财宝猎人羁绊"),
+                       ("base", 6)], "gold": 100},
+            {"name": "30金+40金+30金+30金+40金", "desc": "+170金币", "gold": 170},
+            {"name": "光明宝箱×2+豹药神符×2+40金", "desc": "2光明宝箱 +2豹药神符 +40金币",
+             "items": [("special", "radiant_chest", "光明宝箱", "开出推荐成装的光明版，3选1"),
+                       ("special", "radiant_chest", "光明宝箱", "开出推荐成装的光明版，3选1"),
+                       ("rune", "leopard_potion"), ("rune", "leopard_potion")], "gold": 40},
+        ],
+        8: [
+            {"name": "大妮蔻×2+100金×2", "desc": "2大妮蔻 +200金币",
+             "items": [("special", "mega_neeko", "大妮蔻", "复制1个1星英雄"),
+                       ("special", "mega_neeko", "大妮蔻", "复制1个1星英雄")], "gold": 200},
+            {"name": "豹药神符×3+66生命值", "desc": "3豹药神符 +66生命值",
+             "items": [("rune", "leopard_potion"), ("rune", "leopard_potion"),
+                       ("rune", "leopard_potion")], "hp": 66},
+            {"name": "光明宝箱×2+大妮蔻×2+126金", "desc": "2光明宝箱 +2大妮蔻 +126金币",
+             "items": [("special", "radiant_chest", "光明宝箱", "开出推荐成装的光明版，3选1"),
+                       ("special", "radiant_chest", "光明宝箱", "开出推荐成装的光明版，3选1"),
+                       ("special", "mega_neeko", "大妮蔻", "复制1个1星英雄"),
+                       ("special", "mega_neeko", "大妮蔻", "复制1个1星英雄")], "gold": 126},
+        ],
+        9: [
+            {"name": "掠夺·商店", "desc": "刷新与购买不再消耗金币；5费卡永久9张",
+             "type": "plunder", "plunder": "shop"},
+            {"name": "掠夺·羁绊", "desc": "所有上阵弈子直接激活所属羁绊最高等级",
+             "type": "plunder", "plunder": "trait"},
+            {"name": "掠夺·技能", "desc": "敌方单位无法释放技能",
+             "type": "plunder", "plunder": "skill"},
+        ],
+    }.get(layer, [])
+
+
+def roll_bounty_reward(layer):
+    options = _bounty_reward_options(layer)
+    if not options:
+        options = _bounty_reward_options(2)
+    return copy.deepcopy(random.choice(options))
+
+
+def _add_bounty_item(gs, item):
+    if len(gs.me["items"]) < MAX_ITEM_BENCH:
+        gs.me["items"].append(item)
+        return True
+    gs.me.setdefault("free_item_store", []).append(item)
+    return False
+
+
+def _make_random_combined_item():
+    r = random.choice(list(COMBINE_TABLE.values()))
+    return {"id": "bounty_comb_" + re.sub(r"\\W+", "_", r["name"]),
+            "name": r["name"], "stats": dict(r["stats"]),
+            "color": r["color"], "is_combined": True}
+
+
+
+def make_special_item(kind):
+    name, desc = SPECIAL_ITEM_DATA.get(kind, (kind, "特殊装备"))
+    item = {
+        "id": kind,
+        "name": name,
+        "desc": desc,
+        "stats": {},
+        "color": (255, 210, 90),
+        "is_special": True,
+        "is_combined": True,
+        "special_kind": kind,
+    }
+    if kind in ("emblem_treasure", "emblem_lumber"):
+        item["is_emblem"] = True
+        item["emblem_trait"] = "Treasure" if kind == "emblem_treasure" else "Lumber"
+    return item
+
+
+def make_trait_emblem(trait):
+    """通用纹章：装备后把对应羁绊加入棋子，允许同类纹章叠加。"""
+    return {
+        "id": "emblem_" + str(trait),
+        "name": trait_cn(trait) + "纹章",
+        "desc": "装备后激活该羁绊。",
+        "stats": {},
+        "color": TRAIT_COLOR.get(trait, (220, 180, 80)),
+        "is_special": True,
+        "is_combined": True,
+        "special_kind": "emblem_generic",
+        "is_emblem": True,
+        "emblem_trait": trait,
+    }
+
+def make_artifact_item(name=None):
+    name = name or random.choice(LEOPARD_ARTIFACT_NAMES)
+    d = LEOPARD_ARTIFACTS[name]
+    return {
+        "id": "artifact_" + re.sub(r"\W+", "_", name),
+        "name": name,
+        "desc": d["desc"],
+        "stats": {},
+        "color": d["color"],
+        "is_special": True,
+        "is_artifact": True,
+        "artifact_name": name,
+        "is_combined": True,
+    }
+
+def _reroll_item(item):
+    if item.get("is_emblem") or item.get("special_kind") in ("emblem_treasure", "emblem_lumber"):
+        # 昊天锤敲纹章时，可将其他纹章敲成财宝猎人纹章。
+        return make_special_item("emblem_treasure")
+    if item.get("rune_kind") == "leopard":
+        return make_rune_item("potion")
+    if item.get("rune_kind") == "potion":
+        return make_rune_item("leopard")
+    if item.get("rune_kind") in ("leopard_potion", "fat_leopard", "rotten_potion"):
+        return make_rune_item(random.choice(["leopard_potion", "fat_leopard", "rotten_potion"]))
+    if item.get("is_radiant"):
+        r = random_radiant_item()
+        return r or item
+    if item.get("is_combined"):
+        candidates=[make_item for make_item in (
+            (lambda: _make_random_combined_item()), (lambda: random_radiant_item())
+        )]
+        return random.choice(candidates)() or item
+    return new_item(random.choice(ITEM_IDS))
+
+
+def _plunder_active(player, kind):
+    return player.get("_active_plunder") == kind
+
+
+def _add_bounty_unit(gs, unit):
+    empty = next((i for i, x in enumerate(gs.me.get("bench", [])) if x is None), None)
+    if empty is not None:
+        gs.me["bench"][empty] = unit
+        return True
+    # 备战席满时不丢失奖励：按该棋子星级折算金币。
+    gs.me["gold"] += unit.get("cost", 1) * (3 ** max(0, unit.get("star", 1) - 1))
+    return False
+
+
+def apply_bounty_reward(gs, reward):
+    player = gs.me
+    if reward.get("type") == "plunder":
+        plunder = reward.get("plunder")
+        gs._pending_plunder = plunder
+        gs._active_plunder = plunder
+        player["_active_plunder"] = plunder
+        if plunder == "trait":
+            player["_plunder_trait"] = True
+        gs.battle_log = "终极掠夺已激活：" + reward.get("name", "")
+        return
+
+    player["gold"] += int(reward.get("gold", 0))
+    player["hp"] += int(reward.get("hp", 0))
+    for kind in reward.get("items", []):
+        if not kind:
+            continue
+        typ = kind[0]
+        if typ == "base":
+            for _ in range(int(kind[1])):
+                _add_bounty_item(gs, new_item(random.choice(ITEM_IDS)))
+        elif typ == "combined":
+            for _ in range(int(kind[1])):
+                _add_bounty_item(gs, _make_random_combined_item())
+        elif typ == "random_item":
+            _add_bounty_item(gs, new_item(random.choice(ITEM_IDS)))
+        elif typ == "artifact_random":
+            _add_bounty_item(gs, make_artifact_item())
+        elif typ == "radiant_random":
+            rad = random_radiant_item()
+            if rad:
+                _add_bounty_item(gs, rad)
+        elif typ == "orb":
+            for _ in range(int(kind[1])):
+                _add_bounty_item(gs, _bounty_item(
+                    "orb_" + str(random.randint(1, 999999)), "法球",
+                    "野怪随机掉落物"))
+        elif typ == "tome":
+            _add_bounty_item(gs, _bounty_item(
+                "emblem_tome", "纹章之书", "购买后出售以选择4个随机纹章"))
+        elif typ == "rune":
+            _add_bounty_item(gs, make_rune_item(kind[1]))
+        elif typ == "special":
+            sk = kind[1]
+            if sk == "artifact_forge":
+                _add_bounty_item(gs, make_artifact_item())
+            else:
+                _add_bounty_item(gs, make_special_item(sk))
+        elif typ == "champion_bundle":
+            five = [c for c in CHAMPION_LIST if c.get("cost") == 5 and "Lumber" in c.get("traits", []) and not c.get("no_shop")]
+            other = [c for c in CHAMPION_LIST if "Lumber" in c.get("traits", []) and c.get("cost") != 5 and not c.get("no_shop")]
+            if five:
+                _add_bounty_unit(gs, make_unit_with_star(random.choice(five)["name"], 2))
+            for c in other:
+                u = make_unit_with_star(c["name"], 3)
+                if u:
+                    _add_bounty_unit(gs, u)
+    if reward.get("name") == "财宝猎人纹章+伐木纹章":
+        pass
+    if len(player["items"]) > MAX_ITEM_BENCH:
+        overflow = player["items"][MAX_ITEM_BENCH:]
+        player["items"] = player["items"][:MAX_ITEM_BENCH]
+        player.setdefault("free_item_store", []).extend(overflow)
+
+
+HEX_TREASURE_REWARDS = [
+    {"name": "宝物库：转职", "rarity": "gold", "desc": "获得1个随机羁绊转职。", "effect": "treasure_reward", "value": "emblem"},
+    {"name": "宝物库：灵符", "rarity": "gold", "desc": "获得1个豹灵符或药灵符。", "effect": "treasure_reward", "value": "talisman"},
+    {"name": "宝物库：神符", "rarity": "gold", "desc": "获得1个随机神符。", "effect": "treasure_reward", "value": "rune"},
+    {"name": "宝物库：神器", "rarity": "prismatic", "desc": "获得1件随机豹药神器。", "effect": "treasure_reward", "value": "artifact"},
+    {"name": "宝物库：光明装备", "rarity": "prismatic", "desc": "获得1件随机光明装备。", "effect": "treasure_reward", "value": "radiant"},
+    {"name": "宝物库：特殊道具", "rarity": "gold", "desc": "获得1个特殊道具。", "effect": "treasure_reward", "value": "special"},
+]
+HEX_LIST.extend(HEX_TREASURE_REWARDS)
 
 def roll_hex_choices():
+
     r = random.randint(1, 100)
     if r <= 60:
         rarity = "silver"
@@ -1231,6 +1822,8 @@ def apply_hex_to_player(player, hex_data):
         hb[eff] = hb.get(eff, 0.0) + val
     elif eff == "income":
         hb["income"] = hb.get("income", 0) + int(val)
+    elif eff == "treasure_reward":
+        _grant_augment_reward(player, val)
     if "hex_list" not in player:
         player["hex_list"] = []
     player["hex_list"].append(copy.deepcopy(hex_data))
@@ -1299,7 +1892,7 @@ CHAMPION_LIST = [
      "attack_cooldown": 1.1, "sp_base_dmg": 110, "sp_multiplier": 1.4,
      "attack_range": RANGE_ARCHER, "star": 1, "skill_desc": "Flying Jump",
      "skill_type": "damage"},
-    {"name": "FeiBo", "cost": 2, "traits": ["BearRidge", "Treasure"],
+    {"name": "FeiBo", "cost": 2, "traits": ["BearRidge"],
      "role": "mage",
      "hp": 550, "ad": 38, "max_mana": 36, "mana_per_attack": 10,
      "attack_cooldown": 1.35, "sp_base_dmg": 130, "sp_multiplier": 1.6,
@@ -1310,13 +1903,13 @@ CHAMPION_LIST = [
      "attack_cooldown": 1.3, "sp_base_dmg": 140, "sp_multiplier": 1.5,
      "attack_range": RANGE_WARRIOR, "star": 1, "skill_desc": "Bear Paw",
      "skill_type": "damage"},
-    {"name": "MaoMao", "cost": 2, "traits": ["BearRidge", "Treasure"],
+    {"name": "MaoMao", "cost": 2, "traits": ["BearRidge"],
      "role": "archer",
      "hp": 500, "ad": 62, "max_mana": 32, "mana_per_attack": 12,
      "attack_cooldown": 1.1, "sp_base_dmg": 120, "sp_multiplier": 1.5,
      "attack_range": RANGE_ARCHER, "star": 1, "skill_desc": "Banana Barrage",
      "skill_type": "damage"},
-    {"name": "JiJi", "cost": 3, "traits": ["BearRidge", "Treasure"],
+    {"name": "JiJi", "cost": 3, "traits": ["BearRidge"],
      "role": "mage",
      "hp": 660, "ad": 45, "max_mana": 44, "mana_per_attack": 10,
      "attack_cooldown": 1.3, "sp_base_dmg": 180, "sp_multiplier": 1.7,
@@ -1338,7 +1931,7 @@ CHAMPION_LIST = [
      "attack_cooldown": 1.4, "sp_base_dmg": 300, "sp_multiplier": 1.8,
      "attack_range": RANGE_TANK, "star": 1, "skill_desc": "Bear Charge",
      "skill_type": "shield"},
-    {"name": "GuangTouQiang", "cost": 5, "traits": ["BearRidge", "Treasure"],
+    {"name": "GuangTouQiang", "cost": 5, "traits": ["BearRidge"],
      "role": "warrior",
      "hp": 1400, "ad": 95, "max_mana": 58, "mana_per_attack": 11,
      "attack_cooldown": 1.2, "sp_base_dmg": 300, "sp_multiplier": 2.2,
@@ -1374,13 +1967,13 @@ CHAMPION_LIST = [
      "attack_range": RANGE_ARCHER, "star": 1, "skill_desc": "Butterfly Dance",
      "skill_type": "damage"},
     {"name": "LeopardPotion", "cost": 3,
-     "traits": ["PotionClan", "LeopardKind", "RuneLand"],
+     "traits": ["PotionClan", "LeopardKind"],
      "role": "warrior",
      "hp": 720, "ad": 60, "max_mana": 42, "mana_per_attack": 12,
      "attack_cooldown": 1.2, "sp_base_dmg": 165, "sp_multiplier": 1.7,
      "attack_range": RANGE_WARRIOR, "star": 1, "skill_desc": "Poison Assault",
 "skill_type": "damage", "skill_dmg_type": "magic"},
-    {"name": "SweatyElder", "cost": 3, "traits": ["Elder", "RuneLand"],
+    {"name": "SweatyElder", "cost": 3, "traits": ["Elder"],
      "role": "mage",
      "hp": 850, "ad": 44, "max_mana": 45, "mana_per_attack": 9,
      "attack_cooldown": 1.5, "sp_base_dmg": 125, "sp_multiplier": 1.6,
@@ -1410,7 +2003,7 @@ CHAMPION_LIST = [
      "attack_cooldown": 1.2, "sp_base_dmg": 290, "sp_multiplier": 2.2,
      "attack_range": RANGE_WARRIOR, "star": 1, "skill_desc": "Doom Leopard",
      "skill_type": "damage", "skill_dmg_type": "magic"},
-    {"name": "SuperLogger", "cost": 5, "traits": ["Lumber", "Treasure"],
+    {"name": "SuperLogger", "cost": 5, "traits": ["Lumber"],
      "role": "warrior",
      "hp": 1300, "ad": 95, "max_mana": 58, "mana_per_attack": 10,
      "attack_cooldown": 1.25, "sp_base_dmg": 270, "sp_multiplier": 2.1,
@@ -1441,7 +2034,7 @@ CHAMPION_LIST = [
      "attack_range": RANGE_MAGE, "star": 1, "skill_desc": "Crystal Veil",
      "skill_type": "damage", "skill_dmg_type": "magic"},
 
-    {"name": "RuneArcher", "cost": 3, "traits": ["RuneLand", "Treasure"],
+    {"name": "RuneArcher", "cost": 3, "traits": ["RuneLand"],
      "role": "archer",
      "hp": 640, "ad": 62, "max_mana": 40, "mana_per_attack": 12,
      "attack_cooldown": 1.15, "sp_base_dmg": 165, "sp_multiplier": 1.7,
@@ -1452,7 +2045,7 @@ CHAMPION_LIST = [
      "attack_cooldown": 1.2, "sp_base_dmg": 210, "sp_multiplier": 1.9,
      "attack_range": RANGE_WARRIOR, "star": 1, "skill_desc": "Thunder Strike",
 "skill_type": "damage", "skill_dmg_type": "magic"},
-    {"name": "ArcaneLord", "cost": 5, "traits": ["RuneLand", "Treasure"],
+    {"name": "ArcaneLord", "cost": 5, "traits": ["RuneLand"],
      "role": "mage",
      "hp": 1380, "ad": 85, "max_mana": 60, "mana_per_attack": 10,
      "attack_cooldown": 1.25, "sp_base_dmg": 320, "sp_multiplier": 2.3,
@@ -1507,7 +2100,7 @@ CHAMPION_LIST = [
      "attack_cooldown": 1.5, "sp_base_dmg": 155, "sp_multiplier": 1.3,
      "attack_range": RANGE_TANK, "star": 1, "skill_desc": "Ox Charge",
      "skill_type": "bulwark"},
-    {"name": "FrogBulwark", "cost": 2, "traits": ["FrogTribe", "RuneLand"], "role": "tank",
+    {"name": "FrogBulwark", "cost": 2, "traits": ["FrogTribe"], "role": "tank",
      "hp": 900, "ad": 45, "max_mana": 44, "mana_per_attack": 10,
      "attack_cooldown": 1.45, "sp_base_dmg": 175, "sp_multiplier": 1.5,
      "attack_range": RANGE_TANK, "star": 1, "skill_desc": "Gel Shield",
@@ -1517,17 +2110,17 @@ CHAMPION_LIST = [
      "attack_cooldown": 1.45, "sp_base_dmg": 220, "sp_multiplier": 1.7,
      "attack_range": RANGE_TANK, "star": 1, "skill_desc": "Roar Guard",
      "skill_type": "shield"},
-    {"name": "PotionKeep", "cost": 3, "traits": ["PotionClan", "RuneLand"], "role": "tank",
+    {"name": "PotionKeep", "cost": 3, "traits": ["PotionClan"], "role": "tank",
      "hp": 1050, "ad": 48, "max_mana": 46, "mana_per_attack": 10,
      "attack_cooldown": 1.5, "sp_base_dmg": 230, "sp_multiplier": 1.7,
      "attack_range": RANGE_TANK, "star": 1, "skill_desc": "Vial Fortress",
      "skill_type": "shield", "skill_dmg_type": "magic"},
-    {"name": "ThornGuard", "cost": 4, "traits": ["LeopardKind", "RuneLand"], "role": "tank",
+    {"name": "ThornGuard", "cost": 4, "traits": ["LeopardKind"], "role": "tank",
      "hp": 1220, "ad": 58, "max_mana": 50, "mana_per_attack": 10,
      "attack_cooldown": 1.4, "sp_base_dmg": 280, "sp_multiplier": 1.8,
      "attack_range": RANGE_TANK, "star": 1, "skill_desc": "Thorn Burst",
      "skill_type": "burst_shield"},
-    {"name": "OxBastion", "cost": 4, "traits": ["Lumber", "RuneLand"], "role": "tank",
+    {"name": "OxBastion", "cost": 4, "traits": ["Lumber"], "role": "tank",
      "hp": 1280, "ad": 58, "max_mana": 52, "mana_per_attack": 10,
      "attack_cooldown": 1.4, "sp_base_dmg": 285, "sp_multiplier": 1.85,
      "attack_range": RANGE_TANK, "star": 1, "skill_desc": "Ox Aegis",
@@ -1537,12 +2130,12 @@ CHAMPION_LIST = [
      "attack_cooldown": 1.4, "sp_base_dmg": 350, "sp_multiplier": 2.1,
      "attack_range": RANGE_TANK, "star": 1, "skill_desc": "Ancestral Boil",
      "skill_type": "burst_shield", "skill_dmg_type": "magic"},
-    {"name": "LeopardBow", "cost": 1, "traits": ["LeopardKind", "Treasure"], "role": "archer",
+    {"name": "LeopardBow", "cost": 1, "traits": ["LeopardKind"], "role": "archer",
      "hp": 490, "ad": 55, "max_mana": 30, "mana_per_attack": 13,
      "attack_cooldown": 1.1, "sp_base_dmg": 110, "sp_multiplier": 1.4,
      "attack_range": RANGE_ARCHER, "star": 1, "skill_desc": "Venom Bolt",
      "skill_type": "damage"},
-    {"name": "FrogBomb", "cost": 2, "traits": ["FrogTribe", "RuneLand"], "role": "archer",
+    {"name": "FrogBomb", "cost": 2, "traits": ["FrogTribe"], "role": "archer",
      "hp": 540, "ad": 52, "max_mana": 34, "mana_per_attack": 12,
      "attack_cooldown": 1.15, "sp_base_dmg": 135, "sp_multiplier": 1.55,
      "attack_range": RANGE_ARCHER, "star": 1, "skill_desc": "Toxic Bomb",
@@ -1552,44 +2145,61 @@ CHAMPION_LIST = [
      "attack_cooldown": 1.2, "sp_base_dmg": 185, "sp_multiplier": 1.7,
      "attack_range": RANGE_ARCHER, "star": 1, "skill_desc": "Heavy Shot",
      "skill_type": "damage"},
-    {"name": "VialSniper", "cost": 4, "traits": ["PotionClan", "RuneLand"], "role": "archer",
+    {"name": "VialSniper", "cost": 4, "traits": ["PotionClan"], "role": "archer",
      "hp": 680, "ad": 62, "max_mana": 48, "mana_per_attack": 13,
      "attack_cooldown": 1.05, "sp_base_dmg": 210, "sp_multiplier": 1.8,
      "attack_range": RANGE_ARCHER, "star": 1, "skill_desc": "Needle Storm",
      "skill_type": "damage"},
-    {"name": "SwiftStrike", "cost": 5, "traits": ["LeopardKind", "RuneLand"], "role": "archer",
+    {"name": "SwiftStrike", "cost": 5, "traits": ["LeopardKind"], "role": "archer",
      "hp": 720, "ad": 88, "max_mana": 55, "mana_per_attack": 13,
      "attack_cooldown": 1.0, "sp_base_dmg": 290, "sp_multiplier": 2.1,
      "attack_range": RANGE_ARCHER, "star": 1, "skill_desc": "Swift Barrage",
      "skill_type": "damage"},
 ]
 TRAIT_DATA = {
-    "PotionClan": [2, 4, 6, 8], "LeopardKind": [2, 4], "FrogTribe": [2, 3],
-    "Lumber": [2, 4], "Dancer": [2], "Elder": [2],
+    "PotionClan": [2, 4, 6, 8, 10], "LeopardKind": [2, 4, 6, 8, 10],
+    "FrogTribe": [2, 4, 6],
+    "Lumber": [2, 4, 6, 8], "Dancer": [2, 3, 5], "Elder": [2, 3, 5],
     "BearRidge": [3, 5, 7, 10], "RuneLand": [2, 4, 6, 8, 11],
-    "Treasure": [2, 4, 6, 8],
-    "Thunder": [2, 4, 6],
+    "Treasure": [3, 4, 5, 6, 8],
+    "Thunder": [2, 4, 6, 8],
     "ClassTank": [2, 4, 6, 8],
     "ClassArcher": [2, 4, 6, 8],
     "ClassMage": [2, 4, 6, 8],
     "ClassWarrior": [2, 4, 6, 8],
 }
 TRAIT_DESC = {
-    "PotionClan": ("法强", ["+12%", "+28%", "+50%", "+80%"]),
-    "LeopardKind": ("暴击", ["+18%", "+38%"]),
-    "FrogTribe": ("生命/治疗", ["+8%/+15%", "+20%/+38%"]),
-    "Lumber": ("最大生命", ["+12%", "+28%"]),
-    "Dancer": ("攻速", ["+25%"]),
-    "Elder": ("敌方攻击", ["-12%"]),
+    "PotionClan": ("法强",
+                   ["+12%", "+28%", "+50%", "+80%", "+120%"]),
+    "LeopardKind": ("暴击",
+                    ["+18%", "+38%", "+60%", "+85%", "+115%"]),
+    "FrogTribe": ("生命/治疗",
+                  ["+8%/+15%", "+20%/+38%", "+35%/+65%"]),
+    "Lumber": ("最大生命", ["+12%", "+28%", "+48%", "+72%"]),
+    "Dancer": ("攻速", ["+25%", "+45%", "+70%"]),
+    "Elder": ("敌方攻击", ["-12%", "-22%", "-35%"]),
     "BearRidge": ("召唤团子", ["1星", "2星", "3星", "4星"]),
     "RuneLand": ("攻速/回蓝",
                  ["+10%/+1", "+22%/+2", "+36%/+3", "+52%/+4", "+70%/+5"]),
-    "Treasure": ("每回合金币", ["+1", "+3", "+6", "+10"]),
-    "Thunder": ("雷霆整活", ["攻速+15%", "攻速+30%", "全场发弹幕"]),
+    "Treasure": ("",
+                 ["在玩家战斗中获胜会获得2份藏宝碎片，失败会获得3份藏宝碎片",
+                  "在玩家战斗中获胜会获得2份藏宝碎片，失败会获得4份藏宝碎片",
+                  "在玩家战斗中获胜会获得3份藏宝碎片，失败会获得5份藏宝碎片",
+                  "在玩家战斗中获胜会获得4份藏宝碎片，失败会获得7份藏宝碎片",
+                  "激活藏宝秘境的终极形态，并解锁终极的第9层奖励！"]),
+    "Thunder": ("雷霆整活",
+                ["攻速+15%", "攻速+30%", "全场发弹幕", "全场狂暴"]),
+
     "ClassTank": ("坦克生命", ["+15%", "+30%", "+50%", "+80%"]),
     "ClassArcher": ("射手攻速", ["+15%", "+30%", "+50%", "+80%"]),
     "ClassMage": ("术士 攻强+法强", ["+15%", "+30%", "+50%", "+80%"]),
     "ClassWarrior": ("战士真伤", ["+10%", "+20%", "+35%", "+60%"]),
+}
+TRAIT_FLAVOR = {
+    "Treasure": [
+        "【财宝猎人】寻宝者必须四处搜寻线索，集齐10份藏宝碎片才能开启秘宝。",
+        "秘宝开启后，选择立刻带走战利品，或者尝试继续寻宝来获得更好的奖励。",
+    ],
 }
 TRAIT_COLOR = {"BearRidge": BEAR_COLOR, "RuneLand": RUNE_COLOR,
                "Treasure": TREASURE_COLOR}
@@ -1674,6 +2284,76 @@ COST_COMPENSATION = {1: (1.08, 1.05), 2: (1.05, 1.03),
                      3: (1.03, 1.02), 4: (1.0, 1.0), 5: (1.0, 1.0)}
 
 
+
+# ============================================================
+#  v1.2.9 G：三星五费专属机制
+# ============================================================
+THREE_STAR_5COST = {
+    "Dragon": {"title": "龙神降世", "color": (255, 100, 80), "tag": "summon"},
+    "GuangTouQiang": {"title": "熊王狂怒", "color": (220, 150, 60), "tag": "warrior"},
+    "BaoLan": {"title": "豹神终焉", "color": (230, 80, 230), "tag": "warrior"},
+    "SuperLogger": {"title": "伐木天灾", "color": (100, 220, 100), "tag": "warrior"},
+    "GodFrog": {"title": "蛙神天降", "color": (80, 240, 150), "tag": "mage"},
+    "PotionCreator": {"title": "药神创世", "color": (255, 100, 140), "tag": "mage"},
+    "ArcaneLord": {"title": "秘法终章", "color": (150, 100, 255), "tag": "mage"},
+    "Tuanzi": {"title": "冰霜神域", "color": (150, 220, 255), "tag": "tank"},
+    "ThunderPatch": {"title": "雷霆天罚", "color": (255, 230, 70), "tag": "warrior"},
+    "AncientVial": {"title": "远古圣瓶", "color": (120, 220, 180), "tag": "tank"},
+    "SwiftStrike": {"title": "疾斑灭世", "color": (255, 210, 90), "tag": "archer"},
+}
+
+def apply_three_star_5cost_stats(unit):
+    """三星五费：高生命、高攻击，并记录专属机制标记。"""
+    if unit.get("cost", 0) != 5 or unit.get("star", 1) < 3:
+        return unit
+    # 在原三星倍率基础上进一步强化，但保持不同费用的基础平衡关系。
+    unit["hp"] = int(unit.get("hp", 1) * 1.30)
+    unit["ad"] = int(unit.get("ad", 1) * 1.22)
+    unit["sp_base_dmg"] = int(unit.get("sp_base_dmg", 0) * 1.25)
+    info = THREE_STAR_5COST.get(unit.get("name"), {})
+    unit["three_star_5cost"] = True
+    unit["three_star_title"] = info.get("title", "终极形态")
+    unit["three_star_color"] = info.get("color", (255, 220, 80))
+    unit["three_star_tag"] = info.get("tag", unit.get("role", "warrior"))
+    return unit
+
+def trigger_three_star_5cost(unit, allies, enemies, effects, screen_w, screen_h):
+    """三星五费施法时的质变机制。"""
+    if not unit.base.get("three_star_5cost") or unit.base.get("star", 1) < 3:
+        return
+    tag = unit.base.get("three_star_tag", unit.base.get("role", "warrior"))
+    c = unit.base.get("three_star_color", (255, 220, 80))
+    alive_enemies = [e for e in enemies if e.alive]
+    alive_allies = [a for a in allies if a.alive]
+    if tag == "warrior":
+        for e in alive_enemies:
+            e.take_damage(max(1, int(unit.base.get("hp", 1) * 0.12)),
+                          source=unit, dmg_type="true")
+    elif tag == "mage":
+        for e in alive_enemies:
+            e.current_mana = max(0, e.current_mana - 25)
+            e.take_damage(max(1, int(unit.base.get("sp_base_dmg", 1) * 0.28)),
+                          source=unit, dmg_type="magic")
+    elif tag == "tank":
+        for a in alive_allies:
+            a.shield += int(a.base.get("hp", 1) * 0.16)
+    elif tag == "archer":
+        for e in alive_enemies:
+            e.take_damage(max(1, int(unit.base.get("ad", 1) * 1.2)),
+                          source=unit, dmg_type="physical")
+    elif tag == "summon":
+        for a in alive_allies:
+            a.current_mana = min(a.base.get("max_mana", 100),
+                                 a.current_mana + 20)
+    play_sfx("ult_" + unit.base.get("name", ""))
+    effects.append({"type": "ultimate_cross", "x": unit.x, "y": unit.y,
+                    "life": 1.0, "max_life": 1.0, "color": c})
+    effects.append({"type": "skill_name", "x": unit.x,
+                    "y": unit.y - 92,
+                    "text": unit.base.get("three_star_title", "终极形态"),
+                    "life": 1.6, "max_life": 1.6,
+                    "color": c, "is_ult": True})
+
 def make_unit_with_star(name, star):
     base = get_base_template(name)
     if base is None:
@@ -1685,6 +2365,7 @@ def make_unit_with_star(name, star):
     cb = COST_COMPENSATION.get(cost, (1.0, 1.0))
     u["hp"] = int(base["hp"] * scale * cb[0])
     u["ad"] = int(base["ad"] * scale * cb[1])
+    apply_three_star_5cost_stats(u)
     return safe_unit(u)
 
 
@@ -1724,6 +2405,46 @@ def roll_shop_by_odds(level):
                    for c in candidates]
         picked = random.choices(candidates, weights=weights, k=1)[0]
         offered_counts[picked["name"]] = offered_counts.get(picked["name"], 0) + 1
+        shop.append(copy.deepcopy(picked))
+    return shop
+
+
+def roll_shop_by_odds_free_five(level):
+    odds = SHOP_ODDS.get(level, SHOP_ODDS[MAX_LEVEL])
+    pools = {1: [], 2: [], 3: [], 4: [], 5: []}
+    for c in CHAMPION_LIST:
+        if c.get("no_shop"):
+            continue
+        cost = c.get("cost")
+        if cost not in pools:
+            continue
+        if cost == 5 or pool_remaining(c["name"]) > 0:
+            pools[cost].append(c)
+    shop = []
+    offered = {}
+    for _ in range(5):
+        r = random.randint(1, 100)
+        cum = 0
+        chosen_cost = 1
+        for i, cost in enumerate([1, 2, 3, 4, 5]):
+            cum += odds[i]
+            if r <= cum:
+                chosen_cost = cost
+                break
+        candidates = []
+        for c in pools.get(chosen_cost, []):
+            if c.get("cost") == 5 or pool_remaining(c["name"]) - offered.get(c["name"], 0) > 0:
+                candidates.append(c)
+        if not candidates:
+            candidates = [c for tier in (1,2,3,4,5) for c in pools[tier]
+                          if c.get("cost") == 5 or pool_remaining(c["name"]) - offered.get(c["name"],0) > 0]
+        if not candidates:
+            shop.append(None)
+            continue
+        picked = random.choice(candidates) if chosen_cost == 5 else random.choices(
+            candidates, weights=[max(1, pool_remaining(c["name"]) - offered.get(c["name"],0))
+                                 for c in candidates], k=1)[0]
+        offered[picked["name"]] = offered.get(picked["name"],0) + 1
         shop.append(copy.deepcopy(picked))
     return shop
 
@@ -1812,6 +2533,13 @@ def count_traits(player):
             class_trait = ROLE_TO_CLASS_TRAIT.get(role)
             if class_trait:
                 tc[class_trait] = tc.get(class_trait, 0) + 1
+    if player.get("_plunder_trait"):
+        for trait in TRAIT_DATA:
+            if trait.startswith("Class"):
+                continue
+            thresholds = TRAIT_DATA.get(trait, [])
+            if thresholds:
+                tc[trait] = max(tc.get(trait, 0), thresholds[-1])
     return tc
 
 
@@ -1833,11 +2561,7 @@ def get_bear_ridge_summon_star(player):
 
 
 def get_treasure_gold(player):
-    tc = count_traits(player)
-    cnt = tc.get("Treasure", 0)
-    for threshold, gold in ((8, 10), (6, 6), (4, 3), (2, 1)):
-        if cnt >= threshold:
-            return gold
+    # v1.2.9：财宝猎人不再提供每回合固定金币，收益统一走收菜碎片。
     return 0
 
 
@@ -1853,18 +2577,28 @@ def apply_trait_buffs(player):
         if tier <= 0:
             continue
         if trait == "PotionClan":
-            buffs["sp_mult"] += _tier_val(tier, [0.0, 0.12, 0.28, 0.50, 0.80])
+            buffs["sp_mult"] += _tier_val(
+                tier, [0.0, 0.12, 0.28, 0.50, 0.80, 1.20])
         elif trait == "LeopardKind":
-            buffs["crit"] += _tier_val(tier, [0.0, 0.18, 0.38])
+            buffs["crit"] += _tier_val(
+                tier, [0.0, 0.18, 0.38, 0.60, 0.85, 1.15])
         elif trait == "Lumber":
-            buffs["hp_mult"] += _tier_val(tier, [0.0, 0.12, 0.28])
+            buffs["hp_mult"] += _tier_val(
+                tier, [0.0, 0.12, 0.28, 0.48, 0.72])
         elif trait == "FrogTribe":
-            buffs["hp_mult"] += _tier_val(tier, [0.0, 0.08, 0.20])
-            buffs["sp_mult"] += _tier_val(tier, [0.0, 0.15, 0.38])
+            buffs["hp_mult"] += _tier_val(
+                tier, [0.0, 0.08, 0.20, 0.35])
+            buffs["sp_mult"] += _tier_val(
+                tier, [0.0, 0.15, 0.38, 0.65])
         elif trait == "Elder":
-            buffs["enemy_atk_mult"] -= 0.12
+            buffs["enemy_atk_mult"] -= _tier_val(
+                tier, [0.0, 0.12, 0.22, 0.35])
         elif trait == "Dancer":
-            buffs["atk_speed_mult"] += 0.25
+            buffs["atk_speed_mult"] += _tier_val(
+                tier, [0.0, 0.25, 0.45, 0.70])
+        elif trait == "Thunder":
+            buffs["atk_speed_mult"] += _tier_val(
+                tier, [0.0, 0.15, 0.30, 0.50, 0.80])
         elif trait == "RuneLand":
             buffs["atk_speed_mult"] += _tier_val(
                 tier, [0.0, 0.10, 0.22, 0.36, 0.52, 0.70])
@@ -2557,6 +3291,8 @@ class BattleUnit:
     def __init__(self, champion_data, start_x, start_y, side, buffs=None, size=48):
         self.base = safe_unit(copy.deepcopy(champion_data))
         self.side = side
+        self.owner_player = None
+        self.rune_set_gold_done = False
         self.start_x = start_x
         self.start_y = start_y
         self.x = start_x
@@ -2582,6 +3318,11 @@ class BattleUnit:
         self.muted = False
         self.shield = 0
         item_stats = get_unit_item_stats(self.base)
+        self.artifacts = [it.get("artifact_name") for it in self.base.get("items", [])
+                          if it.get("is_artifact") and it.get("artifact_name")]
+        self.artifact_flags = set(self.artifacts)
+        self.artifact_once = set()
+        self.artifact_cd = {}
         self.armor = self.base.get("armor", 0) + item_stats.get("armor", 0)
         self.mr = self.base.get("mr", 0) + item_stats.get("mr", 0)
         cost = self.base.get("cost", 1)
@@ -2620,6 +3361,21 @@ class BattleUnit:
         self.crit += item_stats.get("crit", 0)
         self.base["max_mana"] = max(5, self.base["max_mana"] + item_stats.get("mana", 0))
         self.attack_range += item_stats.get("range", 0)
+        if "疾风靴" in self.artifact_flags:
+            self.atk_speed_mult *= 1.45
+            self.move_speed *= 1.45
+            self.crit += 0.35
+        if "豹骨甲" in self.artifact_flags:
+            self.base["hp"] = int(self.base["hp"] * 1.30)
+            self.armor += 35
+            self.mr += 35
+        if "诛仙弓" in self.artifact_flags:
+            self.attack_range += 90
+            self.atk_buff *= 1.10
+        if "浑天仪" in self.artifact_flags:
+            self.atk_buff *= 1.10
+            self.sp_buff *= 1.10
+            self.atk_speed_mult *= 1.10
         self.current_hp = self.base["hp"]
         self.current_mana = 0
         self.skill_flash_timer = 0.0
@@ -2630,6 +3386,7 @@ class BattleUnit:
         self.damage_reduction = 0.0
         self.damage_reduction_timer = 0.0
         self.burst_shield_dmg = 0
+        self._rune_gold_timer = 1.0
 
     def take_damage(self, dmg, source=None, dmg_type="physical"):
         if not self.alive:
@@ -2661,6 +3418,16 @@ class BattleUnit:
             if self.current_hp <= 0:
                 source.kills += 1
         if self.alive and total_incoming > 0:
+            if "玄冰镜" in self.artifact_flags and source is not None and source is not self:
+                source.take_damage(max(1, int(total_incoming * 0.18)), source=self, dmg_type="magic")
+                self.shield += int(self.base["hp"] * 0.08)
+            if "豹骨甲" in self.artifact_flags:
+                nearby = [a for a in getattr(self, "_artifact_allies", []) if a is not self and a.alive]
+                for a in nearby[:2]:
+                    if (a.x-self.x)**2 + (a.y-self.y)**2 <= 150**2:
+                        share = min(int(total_incoming * 0.12), a.current_hp)
+                        a.current_hp -= share
+                        break
             mana_gain = MANA_PER_HIT_TAKEN_FLAT + self.base["max_mana"] * MANA_PER_HIT_TAKEN_PERCENT
             self.add_mana(mana_gain)
         self.flash_timer = 0.25
@@ -2728,17 +3495,31 @@ class BattleUnit:
         return self._pick_nearest(valid)
 
     def cast_skill(self, allies, enemies, effect_list, screen_w, screen_h):
+        owner = self.owner_player
+        if self.side == "enemy" and getattr(owner, "_skill_plunder_block", False):
+            return
         star = self.base["star"]
         star_scale = SKILL_DMG_STAR_SCALE.get(star, SKILL_DMG_STAR_SCALE[4])
         sp_val = int(self.base["sp_base_dmg"] * self.base["sp_multiplier"]
                      * star_scale * self.sp_buff)
         name = self.base["name"]
+        if "火莲印" in self.artifact_flags:
+            target0 = self._pick_skill_target(enemies)
+            if target0 is not None:
+                target0.apply_poison(max(1, int(sp_val * 0.12)), 5.0)
+        if "噬魂幡" in self.artifact_flags:
+            low_targets = [e for e in enemies if e.alive and e.current_hp < e.base["hp"] * 0.30]
+            for e in low_targets:
+                e.take_damage(max(1, int(sp_val * 0.20)), source=self, dmg_type="true")
         if not self.muted:
             play_sfx("skill")
         self.skill_flash_timer = 0.6
         self.cast_count += 1
         is_5cost = self.base.get("cost", 1) == 5
         is_3star_5cost = is_5cost and star >= 3
+        if is_3star_5cost:
+            trigger_three_star_5cost(self, allies, enemies, effect_list,
+                                     screen_w, screen_h)
         ring_color = (255, 220, 80)
         if name == "BaoLan":
             ring_color = (220, 80, 220)
@@ -2912,6 +3693,11 @@ class BattleUnit:
         self.anim_timer = 0.5
 
     def update(self, dt, allies, enemies, effect_list, screen_w, screen_h):
+        if self.owner_player is not None and has_three_rune_set(self.base) and self.alive:
+            self._rune_gold_timer = getattr(self, "_rune_gold_timer", 0.0) - dt
+            if self._rune_gold_timer <= 0:
+                self.owner_player["gold"] += 4
+                self._rune_gold_timer = 1.0
         if self.flash_timer > 0:
             self.flash_timer -= dt
         if self.skill_flash_timer > 0:
@@ -3044,13 +3830,74 @@ class BattleInstance:
         merge_hex_into_buffs(ally_buffs, self.attacker)
         enemy_buffs = apply_trait_buffs(self.defender)
         merge_hex_into_buffs(enemy_buffs, self.defender)
+        if self.attacker.get("_active_plunder") == "skill":
+            self.defender["_skill_plunder_block"] = True
+        if self.defender.get("_active_plunder") == "skill":
+            self.attacker["_skill_plunder_block"] = True
         enemy_buffs["atk_mult"] *= ally_buffs.get("enemy_atk_mult", 1.0)
         ally_buffs["atk_mult"] *= enemy_buffs.get("enemy_atk_mult", 1.0)
         self.allies = self._spawn_units(self.attacker, "ally", screen_w, screen_h, ally_buffs)
         self.enemies = self._spawn_units(self.defender, "enemy", screen_w, screen_h, enemy_buffs)
+        self._activate_battle_artifacts(self.allies, self.enemies)
+        self._activate_battle_artifacts(self.enemies, self.allies)
+        self._spawn_treasure_capture(screen_w, screen_h)
         self._spawn_bear_ridge_summons(screen_w, screen_h, ally_buffs, enemy_buffs)
+        for u in self.allies:
+            u._artifact_allies = self.allies
+            u._artifact_enemies = self.enemies
+        for u in self.enemies:
+            u._artifact_allies = self.enemies
+            u._artifact_enemies = self.allies
         self.sync_mute()
         self._spawn_trait_activation_fx(screen_w, screen_h)
+
+    def _activate_battle_artifacts(self, units, enemies):
+        # Battle-start artifact effects.
+        for u in units:
+            if "九天雷符" in u.artifact_flags:
+                for e in enemies:
+                    if e.alive:
+                        e.muted = True
+                        e.damage_reduction = max(e.damage_reduction, -0.10)
+                u.artifact_once.add("thunder_start")
+            if "浑天仪" in u.artifact_flags:
+                for a in units:
+                    a.atk_buff *= 1.10
+                    a.sp_buff *= 1.10
+                    a.atk_speed_mult *= 1.10
+            if "疾风靴" in u.artifact_flags:
+                u.crit += 0.65
+                u.artifact_once.add("wind_first")
+            if "辟邪玉" in u.artifact_flags:
+                u.artifact_once.add("anti_cc")
+        if any("玲珑塔" in u.artifact_flags for u in units):
+            for u in units:
+                u._linglong_timer = 4.0
+
+    def _artifact_tick(self, dt):
+        for u in self.allies + self.enemies:
+            if not u.alive:
+                continue
+            if "龙神丹" in u.artifact_flags and u.current_hp < u.base["hp"] * 0.5:
+                if "dragon_heal" not in u.artifact_once:
+                    u.current_hp = min(u.base["hp"], u.current_hp + int(u.base["hp"] * 0.35))
+                    u.damage_reduction = max(u.damage_reduction, 0.50)
+                    u.damage_reduction_timer = 1.2
+                    u.artifact_once.add("dragon_heal")
+            if "聚宝盆" in u.artifact_flags and u.kills > getattr(u, "_treasure_bowl_kills", 0):
+                diff = u.kills - getattr(u, "_treasure_bowl_kills", 0)
+                u._treasure_bowl_kills = u.kills
+                if u.owner_player is not None:
+                    u.owner_player["gold"] += diff
+            if "玲珑塔" in u.artifact_flags:
+                u._linglong_timer = getattr(u, "_linglong_timer", 4.0) - dt
+                if u._linglong_timer <= 0:
+                    allies = self.allies if u.side == "ally" else self.enemies
+                    alive = [a for a in allies if a.alive]
+                    if alive:
+                        t = min(alive, key=lambda a: a.current_hp / max(1, a.base["hp"]))
+                        t.shield += int(t.base["hp"] * 0.15)
+                    u._linglong_timer = 4.0
 
     def _spawn_trait_activation_fx(self, screen_w, screen_h):
         for side, player, y_ratio in (
@@ -3094,6 +3941,35 @@ class BattleInstance:
         muted = not self.is_watched
         for u in self.allies + self.enemies:
             u.muted = muted
+
+    def _spawn_treasure_capture(self, screen_w, screen_h):
+        for owner, hunters, victims in (
+            (self.attacker, self.allies, self.enemies),
+            (self.defender, self.enemies, self.allies),
+        ):
+            tc = count_traits(owner)
+            if tc.get("Treasure", 0) < 8 or not hunters or not victims:
+                continue
+            hunters_exist = [u for u in hunters if "Treasure" in u.base.get("traits", [])]
+            if not hunters_exist:
+                continue
+            captured = 0
+            for target in list(victims):
+                if target.alive:
+                    target.current_hp = 0
+                    target.alive = False
+                    target.state = "dead"
+                    captured += 1
+                    self.effects.append({"type": "capture", "x": target.x,
+                                         "y": target.y, "text": "捕获",
+                                         "life": 1.0, "max_life": 1.0,
+                                         "color": TREASURE_COLOR})
+            if captured:
+                owner["_bounty_capture_shards"] = owner.get("_bounty_capture_shards", 0) + captured * 10
+                if owner is self.attacker:
+                    self._treasure_captured_attacker = captured
+                if owner is self.defender:
+                    self._treasure_captured_defender = captured
 
     def _spawn_bear_ridge_summons(self, screen_w, screen_h, ally_buffs, enemy_buffs):
         star_a = get_bear_ridge_summon_star(self.attacker)
@@ -3170,10 +4046,15 @@ class BattleInstance:
                     continue
                 safe_unit(u)
                 x = pad_x + (c + 0.5) * cell_w
-                units.append(BattleUnit(u, x, y, side, buffs, size=size))
+                bu = BattleUnit(u, x, y, side, buffs, size=size)
+                bu.owner_player = player
+                if side == "enemy" and player.get("_skill_plunder_block"):
+                    bu.base["_plunder_skill_block"] = True
+                units.append(bu)
         return units
 
     def update(self, dt, screen_w, screen_h):
+        self._artifact_tick(dt)
         self._update_effects(dt)
         if self.finished:
             return
@@ -3293,6 +4174,14 @@ class GameState:
         self.dragging_item_idx = -1
         self.hover_item_idx = -1
         self.item_click_start = None
+        self.show_item_choice_popup = False
+        self._radiant_chest_choices = None
+        self._masterwork_choices = None
+        self._masterwork_old_items = None
+        self._emblem_tome_choices = None
+        self._item_choice_source_index = -1
+        self._item_choice_target = None
+        self._item_choice_rects = []
         self.show_carousel = False
         self.carousel_options = []
         self.carousel_selected = -1
@@ -3305,6 +4194,14 @@ class GameState:
         self.starter_chosen = False
         self.global_augment = roll_global_augment()
         self.show_global_augment_popup = False
+        self.bounty_shards = 0
+        self.bounty_layer_current = 1
+        self.bounty_last_layer_seen = 1
+        self.bounty_layer_options = []
+        self.show_bounty_popup = False
+        self._pending_plunder = None
+        self._active_plunder = None
+        self._bounty_capture_bonus = 0
         one_cost = [c for c in CHAMPION_LIST
                     if c["cost"] == 1 and not c.get("no_shop")]
         for ai in self.players:
@@ -3390,7 +4287,23 @@ class GameState:
 
     def refresh_shop(self):
         if not self.shop_locked:
-            self.shop = roll_shop_by_odds(self.me["level"])
+            if self.can_free_shop():
+                self.shop = roll_shop_by_odds_free_five(self.me["level"])
+            else:
+                self.shop = roll_shop_by_odds(self.me["level"])
+
+    def can_free_shop(self):
+        return getattr(self, "_active_plunder", None) == "shop"
+
+    def refresh_shop_paid(self):
+        if not self.can_free_shop():
+            if self.me["gold"] < REFRESH_COST:
+                play_sfx("error")
+                return False
+            self.me["gold"] -= REFRESH_COST
+        self.shop_locked = False
+        self.refresh_shop()
+        return True
 
     def current_battle(self):
         if not self.battles:
@@ -3422,12 +4335,12 @@ class GameState:
             play_sfx("error")
             return
         champ = self.shop[idx]
-        if champ is None or self.me["gold"] < champ["cost"]:
+        if champ is None or (not self.can_free_shop() and self.me["gold"] < champ["cost"]):
             play_sfx("error")
             self._toast_msg("金币不足!")
             self.ai_assistant_say("no_gold")
             return
-        if pool_remaining(champ["name"]) <= 0:
+        if pool_remaining(champ["name"]) <= 0 and not (self.can_free_shop() and champ.get("cost") == 5):
             self.shop[idx] = None
             self.battle_log = f"{champ_cn(champ['name'])} 已售罄!"
             self._toast_msg("该棋子已售罄")
@@ -3442,13 +4355,15 @@ class GameState:
             play_sfx("error")
             return
         # Reserve a copy atomically before changing gold or bench state.
-        if not try_consume_pool(champ["name"], 1):
-            self.shop[idx] = None
-            self.battle_log = f"{champ_cn(champ['name'])} 已售罄!"
-            self._toast_msg("该棋子已售罄")
-            play_sfx("error")
-            return
-        self.me["gold"] -= champ["cost"]
+        if not (self.can_free_shop() and champ.get("cost") == 5):
+            if not try_consume_pool(champ["name"], 1):
+                self.shop[idx] = None
+                self.battle_log = f"{champ_cn(champ['name'])} 已售罄!"
+                self._toast_msg("该棋子已售罄")
+                play_sfx("error")
+                return
+        if not self.can_free_shop():
+            self.me["gold"] -= champ["cost"]
         self.me["bench"][empty_idx] = copy.deepcopy(champ)
         self.shop[idx] = None
         play_sfx("buy")
@@ -3484,6 +4399,7 @@ class GameState:
         star = unit.get("star", 1)
         refund = unit["cost"] * (3 ** (star - 1))
         self.me["items"].extend(carried_items)
+        self._flush_free_item_store()
         count = 3 ** (star - 1)
         return_pool(unit["name"], count)
         self.me["gold"] += refund
@@ -3528,6 +4444,169 @@ class GameState:
         self.show_hex_popup = False
         self.hex_choices = []
 
+    def _special_item_index(self, item_ref):
+        if isinstance(item_ref, int):
+            return item_ref if 0 <= item_ref < len(self.me.get("items", [])) else -1
+        return next((i for i, it in enumerate(self.me.get("items", []))
+                     if it is item_ref), -1)
+
+    def use_special_item(self, item_ref, target_unit):
+        idx = self._special_item_index(item_ref)
+        if idx < 0 or target_unit is None:
+            return False
+        item = self.me["items"][idx]
+        kind = item.get("special_kind")
+        if kind not in SPECIAL_ITEM_DATA:
+            return False
+        if not isinstance(target_unit, dict):
+            return False
+        target = target_unit
+
+        if kind == "disassembler":
+            self.me["items"].pop(idx)
+            self.me["items"].append(make_special_item("disassembler"))
+            self.me["items"].extend(target.get("items", []))
+            target["items"] = []
+            self.battle_log = f"拆卸器：已拆下 {champ_cn(target['name'])} 的全部装备"
+            self._flush_free_item_store()
+            return True
+
+        if kind == "haotian_hammer":
+            if not target.get("items"):
+                return False
+            old_items = list(target["items"])
+            target["items"] = [_reroll_item(it) for it in old_items]
+            self.me["items"].pop(idx)
+            self.battle_log = f"昊天锤：重铸 {champ_cn(target['name'])} 身上全部 {len(old_items)} 件装备"
+            return True
+
+        if kind == "masterwork_upgrader":
+            candidates = [it for it in target.get("items", [])
+                          if it.get("is_combined") and not it.get("is_rune")
+                          and not it.get("is_special") and not it.get("is_radiant")]
+            choices = [make_radiant_item(it.get("name", "")) for it in candidates]
+            choices = [x for x in choices if x]
+            if not choices:
+                return False
+            if len(choices) == 1:
+                target["items"].remove(candidates[0])
+                self.me["items"].pop(idx)
+                self.me["items"].append(choices[0])
+                self.battle_log = f"杰作升级器：{candidates[0].get('name')} → {choices[0]['name']}"
+                return True
+            # 多件成装：全部生成可升级候选，但只领取选择的那一件，其他普通成装保留。
+            self._masterwork_choices = choices
+            self._masterwork_old_items = candidates
+            self._item_choice_source_index = idx
+            self._item_choice_target = target
+            self.show_item_choice_popup = True
+            self.battle_log = "杰作升级器：请选择要升为光明版的成装"
+            return True
+
+        if kind == "mega_neeko":
+            empty=next((i for i,x in enumerate(self.me["bench"]) if x is None),None)
+            if empty is None:
+                self.me.setdefault("free_item_store", []).append(make_special_item("mega_neeko"))
+                return False
+            clone=make_unit_with_star(target["name"],1)
+            if clone is None:
+                return False
+            self.me["bench"][empty]=clone
+            self.me["items"].pop(idx)
+            consume_pool(target["name"],1)
+            self.battle_log=f"大妮蔻：复制 {champ_cn(target['name'])} 1星"
+            return True
+
+        if kind == "radiant_chest":
+            choices=[]
+            for it in target.get("items", []):
+                if it.get("is_combined") and not it.get("is_radiant") and not it.get("is_special") and not it.get("is_rune"):
+                    r=make_radiant_item(it.get("name",""))
+                    if r: choices.append(r)
+            choices += [random_radiant_item() for _ in range(max(0,3-len(choices)))]
+            choices=[x for x in choices if x]
+            if not choices:
+                return False
+            # Store three choices for the next click/selection; default first is safe.
+            self._radiant_chest_choices=choices[:3]
+            self.show_item_choice_popup=True
+            self._item_choice_source_index=idx
+            self._item_choice_target=target
+            self.battle_log="光明宝箱：请选择1件光明成装"
+            return True
+
+        if kind == "artifact_forge":
+            self.me["items"][idx]=make_artifact_item()
+            self.battle_log="豹药神器锻造器：获得一件随机豹药神器"
+            return True
+
+        if kind == "emblem_tome":
+            self._emblem_tome_choices=random.sample(
+                [t for t in TRAIT_DATA if t not in ("BearRidge","RuneLand")],
+                min(4, len([t for t in TRAIT_DATA if t not in ("BearRidge","RuneLand")]))
+            )
+            self.show_item_choice_popup=True
+            self._item_choice_source_index=idx
+            self._item_choice_target=None
+            self.battle_log="纹章之书：请选择一个随机纹章"
+            return True
+        return False
+
+    def choose_special_item_option(self, choice_idx):
+        choices=getattr(self,"_radiant_chest_choices",None)
+        source_idx=getattr(self,"_item_choice_source_index",-1)
+        if choices:
+            if not (0 <= choice_idx < len(choices)) or source_idx < 0:
+                return False
+            target=getattr(self,"_item_choice_target",None)
+            if target is None:
+                return False
+            old=[it for it in target.get("items",[]) if it.get("is_combined") and not it.get("is_radiant") and not it.get("is_special") and not it.get("is_rune")]
+            if old:
+                target["items"].remove(old[0])
+            self.me["items"].pop(source_idx)
+            self.me["items"].append(choices[choice_idx])
+            self._radiant_chest_choices=None
+            self.show_item_choice_popup=False
+            self.battle_log="光明宝箱：已获得"+choices[choice_idx]["name"]
+            return True
+        choices=getattr(self,"_masterwork_choices",None)
+        if choices:
+            if not (0 <= choice_idx < len(choices)) or source_idx < 0:
+                return False
+            target=getattr(self,"_item_choice_target",None)
+            old_items=getattr(self,"_masterwork_old_items",None) or []
+            if target is None or choice_idx >= len(old_items):
+                return False
+            old=old_items[choice_idx]
+            if old not in target.get("items",[]):
+                return False
+            target["items"].remove(old)
+            self.me["items"].pop(source_idx)
+            self.me["items"].append(choices[choice_idx])
+            self._masterwork_choices=None
+            self._masterwork_old_items=None
+            self.show_item_choice_popup=False
+            self.battle_log="杰作升级器：已获得"+choices[choice_idx]["name"]
+            self._flush_free_item_store()
+            return True
+        choices=getattr(self,"_emblem_tome_choices",None)
+        if choices and 0 <= choice_idx < len(choices):
+            trait=choices[choice_idx]
+            self.me["items"].pop(source_idx)
+            _add_bounty_item(self, make_trait_emblem(trait))
+            self._emblem_tome_choices=None
+            self.show_item_choice_popup=False
+            self.battle_log=f"纹章之书：获得{trait_cn(trait)}纹章"
+            self._flush_free_item_store()
+            return True
+        return False
+
+    def _flush_free_item_store(self):
+        store = self.me.setdefault("free_item_store", [])
+        while store and len(self.me["items"]) < MAX_ITEM_BENCH:
+            self.me["items"].append(store.pop(0))
+
     def equip_item_to(self, item_ref, source_type, i1, i2=-1):
         if isinstance(item_ref, int):
             item_idx = item_ref
@@ -3547,13 +4626,50 @@ class GameState:
         if unit is None:
             play_sfx("error")
             return False
+        item = self.me["items"][item_idx]
+        # 转职规则：同一棋子不能重复装备同一种转职；
+        # 原生拥有该羁绊的棋子也不能再装备对应羁绊转职。
+        if item.get("is_emblem"):
+            trait = item.get("emblem_trait")
+            if trait:
+                unit_traits = set(unit.get("traits", []))
+                if trait in unit_traits:
+                    play_sfx("error")
+                    self.battle_log = (
+                        f"{champ_cn(unit['name'])} 已拥有「{trait_cn(trait)}」羁绊，不能装备同类转职")
+                    self._toast_msg("已有该羁绊，不能重复装备")
+                    return False
+                if any(it.get("is_emblem") and it.get("emblem_trait") == trait
+                       for it in unit.get("items", [])):
+                    play_sfx("error")
+                    self.battle_log = (
+                        f"{champ_cn(unit['name'])} 已装备「{trait_cn(trait)}」转职，不能重复装备")
+                    self._toast_msg("同一转职不能重复装备")
+                    return False
+        if item.get("is_special") and not item.get("is_emblem"):
+            # 特殊道具拖到棋子上即执行；普通装备/纹章才真正挂到棋子装备栏。
+            return self.use_special_item(item, unit)
         if len(unit.get("items", [])) >= MAX_ITEMS_PER_UNIT:
+            # 满装备时，先尝试与现有装备合成（例如：已有药灵符 + 拖入散件 → 合成纹章）
+            trial = try_combine_items_all(unit.get("items", []) + [item])
+            if len(trial) < len(unit.get("items", [])) + 1:
+                self.me["items"].pop(item_idx)
+                unit["items"] = trial
+                play_sfx("hex")
+                self.battle_log = "装备合成成功!"
+                enforce_population_cap(self.me)
+                self._flush_free_item_store()
+                return True
             play_sfx("error")
             self.battle_log = f"{champ_cn(unit['name'])} 装备已满!"
             self._toast_msg("装备已满!")
             return False
         item = self.me["items"].pop(item_idx)
         unit.setdefault("items", []).append(item)
+        if item.get("is_emblem"):
+            trait = item.get("emblem_trait")
+            if trait:
+                unit.setdefault("traits", []).append(trait)
         play_sfx("coin")
         self.battle_log = f"装备 {item['name']} 给 {champ_cn(unit['name'])}"
         before_len = len(unit["items"])
@@ -3562,6 +4678,7 @@ class GameState:
             self.battle_log = "装备合成成功!"
             play_sfx("hex")
         enforce_population_cap(self.me)
+        self._flush_free_item_store()
         return True
 
     def _start_monster_round(self):
@@ -3624,7 +4741,6 @@ class GameState:
         
         auto_fill_board(self.me)
         
-        self.refresh_shop()
         if round_type == "monster":
             self._start_monster_round()
             return
@@ -3926,6 +5042,12 @@ class GameState:
                 iid = random.choice(ITEM_IDS)
                 self.me["items"].append(new_item(iid))
                 drops.append(ITEMS[iid]["name"])
+        # 极低概率掉落豹灵符/药灵符。
+        if random.random() < 0.01 and len(self.me["items"]) < MAX_ITEM_BENCH:
+            rk = random.choice(["leopard", "potion"])
+            ri = make_rune_item(rk)
+            self.me["items"].append(ri)
+            drops.append(ri["name"])
         if random.random() < 0.6:
             if stage == 1:
                 cost_pool = [1, 2]
@@ -3991,6 +5113,7 @@ class GameState:
 
     def _start_carousel(self):
         self.carousel_options = []
+        rune_holder_assigned = False
         for _ in range(8):
             cost = random.choice([2, 3, 4])
             pool = [c for c in CHAMPION_LIST
@@ -4011,6 +5134,10 @@ class GameState:
                 continue
             iid = random.choice(ITEM_IDS)
             u.setdefault("items", []).append(new_item(iid))
+            if (not rune_holder_assigned) and random.random() < 0.22:
+                rk = random.choice(["leopard", "potion"])
+                u["items"].append(make_rune_item(rk))
+                rune_holder_assigned = True
             consume_pool(champ["name"], 3 if star >= 2 else 1)
             self.carousel_options.append(u)
 
@@ -4101,9 +5228,58 @@ class GameState:
         self.show_carousel = False
         self.carousel_options = []
 
+    def _add_bounty_shards(self):
+        tc = count_traits(self.me)
+        cnt = tc.get("Treasure", 0)
+        if cnt < 3:
+            return
+        max_layer = 9 if cnt >= 8 else 8
+        if self.bounty_layer_current >= max_layer:
+            return
+        won = self.me.get("win_streak", 0) > 0
+        gain = _bounty_gain(cnt, won)
+        if gain <= 0:
+            return
+        self.bounty_shards += gain
+        while (self.bounty_shards >= 10
+               and self.bounty_layer_current < max_layer):
+            self.bounty_shards -= 10
+            self.bounty_layer_current += 1
+            self.bounty_layer_options = [roll_bounty_reward(self.bounty_layer_current)]
+            self.show_bounty_popup = True
+            self.battle_log = (
+                f"收菜系统：到达第 {self.bounty_layer_current} 层！")
+            play_sfx("hex")
+            break
+
+    def _claim_bounty(self):
+        layer = self.bounty_layer_current
+        if self.bounty_layer_options:
+            reward = self.bounty_layer_options[0]
+        else:
+            reward = roll_bounty_reward(layer)
+        apply_bounty_reward(self, reward)
+        self.battle_log = (f"收宝离场：第 {layer} 层获得 "
+                           f"{reward.get('name', '')}")
+        self.bounty_layer_current = 1
+        self.bounty_shards = 0
+        self.bounty_layer_options = []
+        self.show_bounty_popup = False
+        play_sfx("coin")
+
+    def _continue_bounty(self):
+        self.show_bounty_popup = False
+        self.bounty_layer_options = []
+        self.battle_log = (
+            f"深入寻宝：第 {self.bounty_layer_current} 层继续")
+
     def _advance_to_next_round(self):
         self.is_battle_phase = False
         self.battle_phase_resolved = False
+        capture = self.me.pop("_bounty_capture_shards", 0)
+        if capture:
+            self.bounty_shards += capture
+        self._add_bounty_shards()
 
         if self.is_multiplayer:
             if hasattr(self, "_saved_random_state"):
@@ -4155,7 +5331,6 @@ class GameState:
             play_sfx("victory")
             return
         self.battles = []
-        self.shop_locked = False
         self.refresh_shop()
         self.round_counter += 1
         if self.round_counter >= HEX_ROUND_INTERVAL:
@@ -4920,7 +6095,7 @@ def draw_battle(screen, gs, font_lg, font_md, font_sm, font_dmg, W, H):
 
     buckets = {"attack_line": [], "shockwave": [], "cast_pulse": [],
                "skill_name": [], "screen_flash": [], "damage_pop": [],
-               "trait_activate": []}
+               "trait_activate": [], "ultimate_cross": []}
     for eff in battle.effects:
         buckets.get(eff["type"], []).append(eff)
 
@@ -4947,6 +6122,19 @@ def draw_battle(screen, gs, font_lg, font_md, font_sm, font_dmg, W, H):
                                    (int(eff["x"]), int(eff["y"])), r, width)
             except Exception:
                 pass
+    for eff in buckets["ultimate_cross"]:
+        ratio = eff["life"] / max(0.01, eff["max_life"])
+        cx, cy = int(eff["x"]), int(eff["y"])
+        length = int(max(screen.get_width(), screen.get_height()) * (1.0 - ratio))
+        width = max(2, int(10 * ratio))
+        col = eff.get("color", (255, 220, 80))
+        try:
+            pygame.draw.line(screen, col, (cx-length, cy), (cx+length, cy), width)
+            pygame.draw.line(screen, col, (cx, cy-length), (cx, cy+length), width)
+            pygame.draw.circle(screen, col, (cx, cy),
+                               max(6, int(45*(1.0-ratio))), 3)
+        except Exception:
+            pass
     for unit in battle.enemies:
         if unit.alive:
             draw_battle_unit(screen, unit, font_sm, is_ally=False)
@@ -5076,6 +6264,67 @@ def draw_side_traits(screen, view_p, x, y, panel_w, panel_h, font_sm, font_md):
         ly += 22
 
 
+def draw_bounty_popup(screen, gs, font_lg, font_md, font_sm, W, H, mouse_pos):
+    try:
+        ov = pygame.Surface((W, H), pygame.SRCALPHA)
+        ov.fill((0, 0, 0, 220))
+        screen.blit(ov, (0, 0))
+    except Exception:
+        pass
+    layer = gs.bounty_layer_current
+    tc = count_traits(gs.me)
+    max_layer = 9 if tc.get("Treasure", 0) >= 8 else 8
+    draw_text(screen, "收 菜", W // 2, H * 0.18,
+              get_font(40), TREASURE_COLOR, True)
+    draw_text(screen, f"到达第 {layer} 层 (上限 {max_layer} 层)",
+              W // 2, H * 0.24, font_lg, GOLD_COLOR, True)
+    reward = None
+    if gs.bounty_layer_options:
+        reward = gs.bounty_layer_options[0]
+    if reward is None:
+        reward = roll_bounty_reward(layer)
+    card_w = W * 0.70
+    card_h = H * 0.18
+    card_x = W // 2 - card_w // 2
+    card_y = H * 0.33
+    r = pygame.Rect(int(card_x), int(card_y), int(card_w), int(card_h))
+    draw_panel(screen, r, (40, 34, 20), TREASURE_COLOR, 12, 3)
+    draw_text(screen, f"【{reward.get('name', '?')}】",
+              r.centerx, r.y + 24, get_font(28), GOLD_COLOR, True)
+    draw_text(screen, reward.get("desc", ""),
+              r.centerx, r.y + 66, font_md, TEXT_WHITE, True)
+    draw_text(screen, "收宝离场：获得奖励，层数与碎片归零",
+              r.centerx, r.y + 105, font_sm, TEXT_DIM, True)
+    draw_text(screen, "深入寻宝：继续叠层，下回合再战",
+              r.centerx, r.y + 130, font_sm, TEXT_DIM, True)
+    can_continue = layer < max_layer
+    btn_w = W * 0.32
+    btn_h = 60
+    btn_y = H * 0.62
+    claim_btn = pygame.Rect(int(W * 0.10), int(btn_y),
+                            int(btn_w), int(btn_h))
+    cont_btn = pygame.Rect(int(W * 0.58), int(btn_y),
+                           int(btn_w), int(btn_h))
+    hover_c = claim_btn.collidepoint(mouse_pos)
+    draw_button(screen, claim_btn,
+                (60, 50, 20) if not hover_c else (95, 78, 25),
+                TREASURE_COLOR, 10)
+    draw_text(screen, "收宝离场", claim_btn.centerx, claim_btn.centery,
+              get_font(28), GOLD_COLOR, True)
+    if can_continue:
+        hover_k = cont_btn.collidepoint(mouse_pos)
+        draw_button(screen, cont_btn,
+                    (30, 40, 60) if not hover_k else (45, 60, 90),
+                    BLUE, 10)
+        draw_text(screen, "深入寻宝", cont_btn.centerx, cont_btn.centery,
+                  get_font(28), TEXT_WHITE, True)
+    else:
+        draw_button(screen, cont_btn, (40, 30, 30), (90, 60, 60), 10)
+        draw_text(screen, "已到上限", cont_btn.centerx, cont_btn.centery,
+                  font_md, (170, 120, 120), True)
+    return claim_btn, (cont_btn if can_continue else None)
+
+
 def draw_hex_popup(screen, gs, font_lg, font_md, font_sm, W, H):
     try:
         overlay = pygame.Surface((W, H), pygame.SRCALPHA)
@@ -5193,17 +6442,24 @@ def draw_global_augment_popup(screen, gs, font_lg, font_md, font_sm, W, H, mouse
     r = pygame.Rect(int(card_x), int(card_y), int(card_w), int(card_h))
     draw_panel(screen, r, (30, 32, 42), RARITY_COLOR["prismatic"], 12, 4)
     icon_r = pygame.Rect(r.centerx - 40, r.y + 20, 80, 80)
-    base = get_base_template(aug["champ"])
-    cost = base["cost"] if base else 1
-    draw_panel(screen, icon_r, COST_BG.get(cost, (35, 38, 48)),
-               COST_COLORS.get(cost, TEXT_WHITE), 8, 3)
-    draw_text(screen, champ_cn(aug["champ"])[:3], icon_r.centerx,
-              icon_r.centery, get_font(34),
-              COST_COLORS.get(cost, TEXT_WHITE), True)
+    if aug.get("is_treasure_augment"):
+        draw_panel(screen, icon_r, (55, 45, 25), TREASURE_COLOR, 8, 3)
+        draw_text(screen, "宝", icon_r.centerx, icon_r.centery, get_font(34), TREASURE_COLOR, True)
+    else:
+        base = get_base_template(aug["champ"])
+        cost = base["cost"] if base else 1
+        draw_panel(screen, icon_r, COST_BG.get(cost, (35, 38, 48)),
+                   COST_COLORS.get(cost, TEXT_WHITE), 8, 3)
+        draw_text(screen, champ_cn(aug["champ"])[:3], icon_r.centerx,
+                  icon_r.centery, get_font(34),
+                  COST_COLORS.get(cost, TEXT_WHITE), True)
     draw_text(screen, aug["name"], r.centerx, r.y + 115,
               get_font(32), GOLD_COLOR, True)
-    draw_text(screen, f"【{champ_cn(aug['champ'])}】的主题强化",
-              r.centerx, r.y + 155, font_sm, TEXT_DIM, True)
+    if aug.get("is_treasure_augment"):
+        draw_text(screen, "【宝物型强化】", r.centerx, r.y + 155, font_sm, TREASURE_COLOR, True)
+    else:
+        draw_text(screen, f"【{champ_cn(aug['champ'])}】的主题强化",
+                  r.centerx, r.y + 155, font_sm, TEXT_DIM, True)
     draw_text(screen, aug["desc"], r.centerx, r.y + 185,
               font_md, TEXT_WHITE, True)
     btn = pygame.Rect(r.centerx - 90, r.bottom - 60, 180, 44)
@@ -5589,6 +6845,13 @@ def draw_bottom_info_panel(screen, gs, view_p, font_lg, font_md, font_sm,
                 active_cnt += 1
         draw_text(screen, f"激活羁绊: {active_cnt} / {len(tc)}",
                   mid_x + 12, ry, font_sm, GREEN_HP)
+    if tc.get("Treasure", 0) >= 3:
+        ry += 20
+        _layer = getattr(gs, "bounty_layer_current", 1)
+        _shards = getattr(gs, "bounty_shards", 0)
+        _max = 9 if tc.get("Treasure", 0) >= 8 else 8
+        draw_text(screen, f"收菜 第{_layer}/{_max}层  碎片 {_shards}/10",
+                  mid_x + 12, ry, font_sm, TREASURE_COLOR)
     ws = view_p.get("win_streak", 0)
     ls = view_p.get("lose_streak", 0)
     if ws >= 2 or ls >= 2:
@@ -5916,6 +7179,61 @@ def draw_toast(screen, gs, font_md, W, H):
               font_md, (255, 230, 230), True)
 
 
+def draw_item_choice_popup(screen, gs, font_lg, font_md, font_sm, W, H, mouse_pos):
+    try:
+        ov = pygame.Surface((W, H), pygame.SRCALPHA)
+        ov.fill((0, 0, 0, 225))
+        screen.blit(ov, (0, 0))
+    except Exception:
+        pass
+    radiant = getattr(gs, "_radiant_chest_choices", None)
+    masterwork = getattr(gs, "_masterwork_choices", None)
+    tome = getattr(gs, "_emblem_tome_choices", None)
+    choices = radiant if radiant else (masterwork if masterwork else tome)
+    title = "光明宝箱" if radiant else ("杰作升级器" if masterwork else "纹章之书")
+    if radiant:
+        desc = "选择 1 件光明成装"
+    elif masterwork:
+        desc = "选择 1 件成装升级为光明版"
+    else:
+        desc = "选择 1 个随机纹章"
+    draw_text(screen, title, W // 2, int(H * 0.16), get_font(38),
+              GOLD_COLOR, True)
+    draw_text(screen, desc, W // 2, int(H * 0.23), font_md,
+              TEXT_WHITE, True)
+    rects = []
+    if choices:
+        count = len(choices)
+        gap = int(W * 0.025)
+        card_w = int((W * 0.78 - gap * (count - 1)) / max(1, count))
+        card_h = int(H * 0.26)
+        start_x = (W - (card_w * count + gap * (count - 1))) // 2
+        y = int(H * 0.34)
+        for i, choice in enumerate(choices):
+            x = start_x + i * (card_w + gap)
+            r = pygame.Rect(x, y, card_w, card_h)
+            rects.append(r)
+            hover = r.collidepoint(mouse_pos)
+            draw_panel(screen, r, (40, 42, 55) if not hover else (55, 58, 78),
+                       GOLD_COLOR if radiant else PURPLE, 12, 3)
+            if radiant or masterwork:
+                name = choice.get("name", "光明装备")
+                desc2 = "光明版成装"
+            else:
+                name = trait_cn(choice)
+                desc2 = "随机纹章"
+            draw_text(screen, f"{i + 1}", r.centerx, r.y + 28,
+                      get_font(24), GOLD_COLOR, True)
+            draw_text(screen, name, r.centerx, r.y + 82, font_md,
+                      TEXT_WHITE, True)
+            draw_text(screen, desc2, r.centerx, r.y + 126, font_sm,
+                      TEXT_DIM, True)
+            draw_text(screen, "点击选择", r.centerx, r.bottom - 32,
+                      font_sm, GOLD_COLOR, True)
+    gs._item_choice_rects = rects
+    return rects
+
+
 def draw_game(screen, gs, font_lg, font_md, font_sm, font_dmg, W, H, mouse_pos):
     screen.fill(BG_COLOR)
 
@@ -5966,6 +7284,31 @@ def draw_game(screen, gs, font_lg, font_md, font_sm, font_dmg, W, H, mouse_pos):
     hover_item_idx = -1
     path_btn = None
     go_restart = go_menu = None
+
+    if getattr(gs, "show_item_choice_popup", False):
+        draw_item_choice_popup(screen, gs, font_lg, font_md, font_sm, W, H, mouse_pos)
+        draw_text(screen, f"调试: {DBG_LAST}", W // 2, H - 10, font_sm,
+                  (200, 60, 60), align_center=True)
+        return (board_rect_list, bench_rect_list, shop_rect_list,
+                refresh_rect, levelup_rect, gold_btn_rect,
+                trait_btn_rect, auto_btn_rect, prev_btn_rect, next_btn_rect,
+                None, hex_card_rects, battle_selector_rects, lock_rect,
+                carousel_rects, item_bench_rects, augment_rects, starter_rects,
+                ga_btn, hover_item_idx, path_btn, go_restart, go_menu)
+
+    if getattr(gs, "show_bounty_popup", False):
+        bounty_claim_btn, bounty_cont_btn = draw_bounty_popup(
+            screen, gs, font_lg, font_md, font_sm, W, H, mouse_pos)
+        gs._bounty_claim_btn = bounty_claim_btn
+        gs._bounty_cont_btn = bounty_cont_btn
+        draw_text(screen, f"调试: {DBG_LAST}", W // 2, H - 10, font_sm,
+                  (200, 60, 60), align_center=True)
+        return (board_rect_list, bench_rect_list, shop_rect_list,
+                refresh_rect, levelup_rect, gold_btn_rect,
+                trait_btn_rect, auto_btn_rect, prev_btn_rect, next_btn_rect,
+                None, hex_card_rects, battle_selector_rects, lock_rect,
+                carousel_rects, item_bench_rects, augment_rects, starter_rects,
+                ga_btn, hover_item_idx, path_btn, go_restart, go_menu)
 
     if gs.show_carousel:
         carousel_rects = draw_carousel(screen, gs, font_lg, font_md, font_sm,
@@ -6354,7 +7697,10 @@ def draw_game(screen, gs, font_lg, font_md, font_sm, font_dmg, W, H, mouse_pos):
                     is_active = (tier == i + 1)
                     mark = ">" if is_active else " "
                     col2 = GREEN_HP if is_active else (140, 140, 140)
-                    line = f"  {mark} ({thresholds[i]}) {effect_name} {eff_txt}"
+                    if effect_name:
+                        line = f"  {mark} ({thresholds[i]}) {effect_name} {eff_txt}"
+                    else:
+                        line = f"  {mark} ({thresholds[i]}) {eff_txt}"
                     draw_text(screen, line, tx + 20, line_y, font_sm, col2)
                     line_y += 18
             _role_class = {"ClassTank": "tank", "ClassArcher": "archer",
@@ -6567,7 +7913,7 @@ def draw_main_menu(screen, font_title, font_lg, font_md, font_sm,
             label_col = TEXT_WHITE
         draw_text(screen, label, btn.centerx, btn.centery,
                   get_font(28), label_col, True)
-    draw_text(screen, "v1.2.8  ·  Built with Pygame  ·  支持联机对战",
+    draw_text(screen, "v1.2.9  ·  Built with Pygame  ·  支持联机对战",
               W // 2, H - 22, font_sm, (100, 105, 115), True)
     draw_text(screen, f"调试: {DBG_LAST}", W // 2, H - 8, font_sm,
               (200, 60, 60), align_center=True)
@@ -6919,6 +8265,8 @@ def run_game_session(screen, clock, difficulty, font_lg, font_md, font_sm,
                 pass
             elif getattr(gs, "show_global_augment_popup", False):
                 pass
+            elif getattr(gs, "show_bounty_popup", False):
+                pass
             elif gs.show_carousel:
                 pass
             elif gs.show_item_path_popup:
@@ -6957,6 +8305,8 @@ def run_game_session(screen, clock, difficulty, font_lg, font_md, font_sm,
                         continue
                     if (getattr(gs, "show_starter_popup", False)
                             or getattr(gs, "show_global_augment_popup", False)
+                            or getattr(gs, "show_bounty_popup", False)
+                            or getattr(gs, "show_item_choice_popup", False)
                             or gs.show_carousel or gs.show_item_path_popup):
                         continue
 
@@ -6993,10 +8343,7 @@ def run_game_session(screen, clock, difficulty, font_lg, font_md, font_sm,
                         continue
 
                     if event.key == pygame.K_d:
-                        if gs.me["gold"] >= REFRESH_COST:
-                            gs.me["gold"] -= REFRESH_COST
-                            gs.shop_locked = False
-                            gs.refresh_shop()
+                        if gs.refresh_shop_paid():
                             play_sfx("click")
                         else:
                             play_sfx("error")
@@ -7101,6 +8448,25 @@ def run_game_session(screen, clock, difficulty, font_lg, font_md, font_sm,
                             gs._advance_to_next_round()
                             break
                     continue
+                if getattr(gs, "show_item_choice_popup", False):
+                    if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                        mx, my = event.pos
+                        for i, r in enumerate(getattr(gs, "_item_choice_rects", [])):
+                            if r.collidepoint(mx, my):
+                                gs.choose_special_item_option(i)
+                                break
+                    continue
+                if getattr(gs, "show_bounty_popup", False):
+                    if (event.type == pygame.MOUSEBUTTONDOWN
+                            and event.button == 1):
+                        mx, my = event.pos
+                        cb = getattr(gs, "_bounty_claim_btn", None)
+                        kb = getattr(gs, "_bounty_cont_btn", None)
+                        if cb and cb.collidepoint(mx, my):
+                            gs._claim_bounty()
+                        elif kb and kb.collidepoint(mx, my):
+                            gs._continue_bounty()
+                    continue
                 if (gs.show_hex_popup and event.type == pygame.MOUSEBUTTONDOWN
                         and event.button == 1):
                     mx, my = event.pos
@@ -7134,6 +8500,15 @@ def run_game_session(screen, clock, difficulty, font_lg, font_md, font_sm,
                     if gs.is_battle_phase or gs.viewing_player_idx != -1:
                         continue
                     mx, my = event.pos
+                    used_special = False
+                    for ii, ir in enumerate(item_bench_rects):
+                        if ir.collidepoint(mx, my) and ii < len(gs.me.get("items", [])):
+                            it = gs.me["items"][ii]
+                            if it.get("special_kind") and gs.detail_unit is not None:
+                                used_special = gs.use_special_item(it, gs.detail_unit)
+                            break
+                    if used_special:
+                        continue
                     sold = False
                     for (r, bid) in bench_rects:
                         if r.collidepoint(mx, my):
@@ -7169,10 +8544,7 @@ def run_game_session(screen, clock, difficulty, font_lg, font_md, font_sm,
                             gs.buy_xp()
                             continue
                         if refresh_rect and refresh_rect.collidepoint(mx, my):
-                            if gs.me["gold"] >= REFRESH_COST:
-                                gs.me["gold"] -= REFRESH_COST
-                                gs.shop_locked = False
-                                gs.refresh_shop()
+                            if gs.refresh_shop_paid():
                                 play_sfx("click")
                             else:
                                 play_sfx("error")
@@ -7234,10 +8606,7 @@ def run_game_session(screen, clock, difficulty, font_lg, font_md, font_sm,
                         continue
                     if (refresh_rect and refresh_rect.collidepoint(mx, my)
                             and gs.viewing_player_idx == -1):
-                        if gs.me["gold"] >= REFRESH_COST:
-                            gs.me["gold"] -= REFRESH_COST
-                            gs.shop_locked = False
-                            gs.refresh_shop()
+                        if gs.refresh_shop_paid():
                             play_sfx("click")
                         else:
                             play_sfx("error")
@@ -7855,5 +9224,35 @@ def main():
     pygame.quit()
 
 
+
+def run_v129_self_audit():
+    """静态运行时自检：不创建窗口、不启动网络，只检查核心数据一致性。"""
+    errors = []
+    required_traits = {
+        "PotionClan": [2,4,6,8,10], "LeopardKind": [2,4,6,8,10],
+        "FrogTribe": [2,4,6], "Lumber": [2,4,6,8],
+        "Dancer": [2,3,5], "Elder": [2,3,5],
+        "Thunder": [2,4,6,8], "Treasure": [3,4,5,6,8],
+    }
+    for k,v in required_traits.items():
+        if TRAIT_DATA.get(k) != v:
+            errors.append(f"羁绊阈值 {k}")
+    for name, info in THREE_STAR_5COST.items():
+        if name == "Dragon":
+            continue
+        if not any(c.get("name") == name and c.get("cost") == 5 for c in CHAMPION_LIST):
+            errors.append(f"三星五费 {name}")
+    for kind in ("disassembler","haotian_hammer","masterwork_upgrader",
+                 "mega_neeko","radiant_chest","emblem_tome","artifact_forge"):
+        if kind not in SPECIAL_ITEM_DATA:
+            errors.append(f"特殊装备 {kind}")
+    for kind in ("leopard","potion","leopard_potion","fat_leopard","rotten_potion"):
+        if kind not in RUNE_ITEM_DATA:
+            errors.append(f"神符 {kind}")
+    return errors
+
 if __name__ == "__main__":
+    _v129_audit_errors = run_v129_self_audit()
+    if _v129_audit_errors:
+        print("[v1.2.9 自检]", _v129_audit_errors)
     main()

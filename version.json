@@ -1,0 +1,8 @@
+{
+  "version": "1.2.8",
+  "changelog": [
+    "新增检测更新功能",
+    "主菜单加更新按钮"
+  ],
+  "download_url": "https://raw.githubusercontent.com/sqw3340/leopard-universe/main/豹药宇宙.py"
+}

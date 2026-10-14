@@ -1,8 +1,10 @@
 {
-  "version": "1.2.8",
+  "version": "1.2.9",
   "changelog": [
-    "新增检测更新功能",
-    "主菜单加更新按钮"
+    "羁绊阈值调整（药剂/豹族/蛙族/伐木/舞者/长老/雷霆）",
+    "财宝猎人精简为 5 个棋子",
+    "符文大陆减员至 11 个棋子",
+    "新增藏宝秘境收菜系统"
   ],
   "download_url": "https://raw.githubusercontent.com/sqw3340/leopard-universe/main/豹药宇宙.py"
 }

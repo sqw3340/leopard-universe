@@ -183,10 +183,10 @@ DIFFICULTY_ORDER = ["easy", "normal", "hard", "extreme"]
 DIFFICULTY_COLOR = {"easy": (120, 220, 120), "normal": (110, 170, 240),
                      "hard": (255, 170, 60), "extreme": (230, 80, 80)}
 
-CURRENT_VERSION = "1.3.0"
+CURRENT_VERSION = "1.2.9"
 # 更新源：填你自己的远程 version.json 地址（GitHub raw 即可）
 # 留空 "" 则关闭检测更新
-UPDATE_CHECK_URL = "https://raw.githubusercontent.com/sqw3340/leopard-universe/main/version.json"
+UPDATE_CHECK_URL = "https://fastly.jsdelivr.net/gh/sqw3340/leopard-universe@main/version.json"
 
 CHANGELOG_TEXT = [
     "v1.3.0  金铲铲之战对标·伐木羁绊与道具权限完整版",
@@ -332,10 +332,18 @@ def check_for_update(timeout=6):
         return None
 
 
+import urllib.parse
+
 def download_update(url, save_path, timeout=30):
     if not url:
         return False, "下载链接为空"
     try:
+        # 自动将 GitHub 源替换为 jsdelivr 镜像，解决国内连接被拒问题
+        if "raw.githubusercontent.com" in url:
+            url = url.replace("raw.githubusercontent.com", "fastly.jsdelivr.net/gh")
+            url = url.replace("/main/", "@main/")
+        # 修复中文路径导致的 ascii 编码错误，同时确保 @ 不被转义为 %40
+        url = urllib.parse.quote(url, safe=':/?=&%#@')
         req = urllib.request.Request(
             url, headers={"User-Agent": "BaoYaoUniverse"})
         tmp_path = save_path + ".new"
@@ -8822,11 +8830,26 @@ def draw_update_popup(screen, font_lg, font_md, font_sm, W, H, mouse_pos,
     draw_text(screen, "更新内容：", px + 24, y, font_md, TEXT_WHITE)
     y += 26
     for line in cl[:12]:
-        draw_text(screen, f"· {line}", px + 32, y, font_sm, TEXT_WHITE)
-        y += 22
-        if y > py + ph - 120:
-            draw_text(screen, "…", px + 32, y, font_sm, TEXT_DIM)
-            break
+            text = f"· {line}"
+            max_w = pw - 64
+            while text and y <= py + ph - 120:
+                sub = ""
+                for ch in text:
+                    if font_sm.size(sub + ch)[0] <= max_w:
+                        sub += ch
+                    else:
+                        break
+                if not sub:
+                    # 如果连一个字符都放不下，强制放一个，避免死循环
+                    sub = text[0]
+                    text = text[1:]
+                else:
+                    text = text[len(sub):]
+                draw_text(screen, sub, px + 32, y, font_sm, TEXT_WHITE)
+                y += 22
+            if y > py + ph - 120:
+                draw_text(screen, "…", px + 32, y, font_sm, TEXT_DIM)
+                break
 
     if status:
         draw_text(screen, status, W // 2, py + ph - 96,

@@ -1,6 +1,13 @@
 # -*- coding: utf-8 -*-
 """
 豹药宇宙 - 自走棋
+  v1.3.0 金铲铲之战对标·伐木羁绊与道具权限完整版
+    - 新增: 伐木羁绊3/5/8三档 + 巨斧选择器（常驻不消耗、跨回合保留）
+    - 新增: 昊天锤(卸装→重铸→装回) / 拆卸器 / 大妮蔻 权限矩阵
+    - 新增: 纹章之书备战席伪棋子（出售触发4选1）
+    - 新增: 战斗备战席面板 + 详情弹窗统一出售按钮
+    - 优化: 羁绊弹窗两栏分栏+垂直滚动、HUD连胜/连败徽章+利息满提示
+    - 修复: 纹章羁绊无残留、2-1野怪100%掉拆卸器、物品栏散件直接合成
 - 新增: 检测更新与自动更新功能（GitHub 更新源）
     - 新增: 主菜单"检测更新"按钮
     - 新增: 更新弹窗（显示新版本号、更新日志、立即更新按钮）
@@ -68,47 +75,66 @@ from collections import deque
 pygame.display.init()
 pygame.font.init()
 AUDIO_OK = False
-try:
-    pygame.mixer.init(frequency=22050, size=-16, channels=1, buffer=1024)
-    AUDIO_OK = True
-except Exception:
+
+def _try_init_audio():
+    """多配置重试初始化音频；手机上导入时音频设备可能未就绪。"""
+    global AUDIO_OK
+    configs = [
+        dict(frequency=44100, size=-16, channels=2, buffer=512),
+        dict(frequency=22050, size=-16, channels=1, buffer=1024),
+        dict(frequency=44100, size=-16, channels=1, buffer=2048),
+        dict(frequency=22050, size=-16, channels=2, buffer=4096),
+    ]
+    for cfg in configs:
+        try:
+            pygame.mixer.quit()
+            pygame.mixer.init(**cfg)
+            pygame.mixer.music.set_volume(1.0)
+            AUDIO_OK = True
+            return True
+        except Exception:
+            continue
     AUDIO_OK = False
+    return False
+
+_try_init_audio()
 
 FPS = 60
 FIXED_BATTLE_DT = 1.0 / 60.0
 MAX_FIXED_STEPS = 12
 MIN_W, MIN_H = 540, 960
-BG_COLOR = (14, 16, 22)
-PANEL_COLOR = (35, 38, 48)
-PANEL_DARK = (24, 26, 34)
-TEXT_WHITE = (235, 235, 240)
-TEXT_DIM = (140, 145, 155)
-GOLD_COLOR = (255, 210, 90)
-GOLD_DEEP = (200, 150, 40)
-ORANGE_TIMER = (255, 160, 60)
-GREEN_HP = (90, 220, 90)
-RED = (220, 70, 70)
-BLUE = (60, 110, 200)
+BG_COLOR = (18, 20, 28)
+PANEL_COLOR = (32, 35, 46)
+PANEL_DARK = (22, 24, 33)
+TEXT_WHITE = (240, 240, 245)
+TEXT_DIM = (145, 150, 162)
+GOLD_COLOR = (255, 205, 80)
+GOLD_DEEP = (195, 145, 35)
+ORANGE_TIMER = (255, 155, 55)
+GREEN_HP = (80, 215, 100)
+RED = (225, 65, 65)
+BLUE = (65, 120, 210)
 BLUE_DEEP = (35, 65, 130)
-PURPLE = (120, 70, 180)
-PURPLE_DEEP = (70, 40, 110)
-BLUE_MANA = (40, 160, 255)
+PURPLE = (130, 75, 190)
+PURPLE_DEEP = (75, 42, 115)
+BLUE_MANA = (50, 165, 255)
 WHITE_FLASH = (255, 255, 255)
-HIGHLIGHT = (255, 240, 120)
-SELL_RED = (200, 60, 60)
-CRIT_COLOR = (255, 230, 60)
-DAMAGE_COLOR = (255, 80, 80)
-HEAL_COLOR = (80, 255, 120)
-SHIELD_COLOR = (140, 200, 255)
-LOCK_COLOR = (255, 200, 60)
+HIGHLIGHT = (255, 235, 100)
+SELL_RED = (210, 60, 60)
+CRIT_COLOR = (255, 225, 55)
+DAMAGE_COLOR = (255, 75, 75)
+HEAL_COLOR = (75, 255, 125)
+SHIELD_COLOR = (135, 195, 255)
+LOCK_COLOR = (255, 195, 55)
 UNLOCK_COLOR = (130, 130, 130)
-BORDER_LIGHT = (70, 78, 96)
-BEAR_COLOR = (200, 130, 60)
+BORDER_LIGHT = (75, 82, 100)
+BORDER_GOLD = (200, 160, 60)
+BEAR_COLOR = (205, 135, 60)
 RUNE_COLOR = (140, 200, 255)
-TREASURE_COLOR = (255, 200, 60)
-FRONT_ROW_COLOR = (90, 45, 45)
-BACK_ROW_COLOR = (40, 55, 90)
-MIRROR_COLOR = (180, 130, 255)
+TREASURE_COLOR = (255, 195, 55)
+FRONT_ROW_COLOR = (85, 42, 42)
+BACK_ROW_COLOR = (35, 50, 85)
+MIRROR_COLOR = (185, 130, 255)
 ROLE_COLORS = {"tank": (110, 160, 220), "warrior": (220, 120, 90),
                "archer": (130, 220, 120), "mage": (200, 140, 240)}
 ROLE_SHORT = {"tank": "坦", "warrior": "战", "archer": "射", "mage": "术"}
@@ -127,6 +153,7 @@ COST_BG = {1: (55, 55, 60), 2: (40, 70, 40),
 DBG_LAST = "boot"
 BATTLE_DURATION = 30.0
 POST_BATTLE_WAIT = 5.0
+OVERTIME_DURATION = 15.0   # 加时赛：倒计时归零后双方均有存活单位时的追加战斗时长
 PREP_DURATION = 30
 RANGE_TANK = 90
 RANGE_WARRIOR = 140
@@ -156,12 +183,33 @@ DIFFICULTY_ORDER = ["easy", "normal", "hard", "extreme"]
 DIFFICULTY_COLOR = {"easy": (120, 220, 120), "normal": (110, 170, 240),
                      "hard": (255, 170, 60), "extreme": (230, 80, 80)}
 
-CURRENT_VERSION = "1.2.9"
+CURRENT_VERSION = "1.3.0"
 # 更新源：填你自己的远程 version.json 地址（GitHub raw 即可）
 # 留空 "" 则关闭检测更新
 UPDATE_CHECK_URL = "https://raw.githubusercontent.com/sqw3340/leopard-universe/main/version.json"
 
 CHANGELOG_TEXT = [
+    "v1.3.0  金铲铲之战对标·伐木羁绊与道具权限完整版",
+    "  · 新增 伐木（Lumber）羁绊三档：3/5/8，8伐木为棱彩终极羁绊",
+    "  · 新增 巨斧选择器：物品栏常驻、不消耗、跨回合保留首领标记",
+    "  · 新增 3伐木首领吸收最近2名伐木弈子90%生命并获得临时属性",
+    "  · 新增 5伐木全体伐木弈子法强/物攻加成，首领双倍",
+    "  · 新增 8伐木召唤远古树灵：继承全队75%生命攻击与首领装备",
+    "  · 新增 昊天锤：卸下全部装备→重铸→装回原棋子",
+    "  · 新增 装备拆卸器：卸下装备入物品栏，满栏溢出仓库",
+    "  · 新增 大妮蔻：复制目标1星棋子入备战席，满备战席不消耗",
+    "  · 新增 纹章之书：备战席伪棋子，出售触发4选1纹章弹窗",
+    "  · 新增 战斗界面备战席面板开关：战斗中可出售/合成/用道具",
+    "  · 新增 棋子详情弹窗统一出售按钮，战斗棋盘棋子拦截出售",
+    "  · 优化 羁绊弹窗：标题固定头部、内容两栏分栏、垂直滚动条",
+    "  · 优化 HUD：金币栏连胜/连败徽章、利息满5提示",
+    "  · 优化 物品栏两个散件拖拽重叠直接合成，特殊道具禁参合成",
+    "  · 优化 战斗中普通散件可佩戴棋盘棋子，禁拆卸/禁合成",
+    "  · 修复 纹章佩戴加羁绊、卸下去羁绊无残留、不重复叠加",
+    "  · 修复 2-1野怪回合100%掉落装备拆卸器",
+    "  · 修复 巨斧首领角标显示与战斗中模型放大1.2倍",
+    "  · 测试 五套自动化回归（全机制/对局存档/事件注入/专项/长时压力）全部通过",
+    "",
     "v1.2.9  财宝秘境与全新宝物系统完整版",
     "  · 新增 羁绊阈值全面调整：药剂族/豹族/蛙族/伐木/舞者/长老/雷霆/财宝猎人",
     "  · 新增 财宝猎人收菜系统：藏宝碎片、层数、收宝离场、深入寻宝",
@@ -400,6 +448,10 @@ def load_game(gs):
             data = pickle.load(f)
         gs.difficulty = data.get("difficulty", gs.difficulty)
         gs.me = data.get("me", gs.me)
+        # 旧存档补发常驻巨斧选择器
+        if not any(it.get("special_kind") == "giant_axe"
+                   for it in gs.me.get("items", [])):
+            gs.me.setdefault("items", []).append(make_special_item("giant_axe"))
         gs.players = data.get("players", gs.players)
         gs.stage = tuple(data.get("stage", (1, 1)))
         gs.round_counter = data.get("round_counter", 0)
@@ -682,7 +734,8 @@ CHAMP_NAME_CN = {
     "BearBig": "熊大", "BearTwo": "熊二", "GuangTouQiang": "光头强",
     "JiJi": "吉吉", "MaoMao": "毛毛", "FeiBo": "肥波",
     "BengBeng": "蹦蹦", "TuTu": "涂涂", "LaoE": "老鳄", "FeiFei": "肥肥",
-    "Tuanzi": "团子",
+    "Tuanzi": "团子", "AncientTree": "远古树灵",
+    "EmblemTome": "纹章之书",
     "PotionPouch": "药剂袋", "CubLeopard": "豹崽", "MilkFrog": "奶蛙",
     "LoggerStrong": "力伐木", "LeopardPotion": "豹药剂", "SweatyElder": "汗长老",
     "NiuLai": "牛来", "MJWalker": "迈克步", "BaoLan": "豹兰",
@@ -736,6 +789,7 @@ SKILL_NAME_CN = {
     "Flying Jump": "蹦跳突袭", "Owl Wisdom": "夜枭智慧",
     "Croc Bite": "巨鳄撕咬", "Bear Charge": "巨熊冲锋",
     "Lumberjack Rage": "光头强暴怒", "Ice Seal": "冰封之力",
+    "Tree Smash": "巨木碾压",
     "Bite": "撕咬", "Charge": "冲撞", "Rock Throw": "投石",
     "Fire Breath": "龙焰", "Vine Whip": "藤鞭", "Bubble": "气泡",
     "Butterfly Dance": "蝶舞", "Ancient Shell": "远古甲壳",
@@ -843,7 +897,12 @@ def _make_sound(samples):
             buf.append(v)
         if sys.byteorder == "big":
             buf.byteswap()
-        return pygame.mixer.Sound(buffer=buf.tobytes())
+        snd = pygame.mixer.Sound(buffer=buf.tobytes())
+        try:
+            snd.set_volume(0.9)
+        except Exception:
+            pass
+        return snd
     except Exception:
         return None
 
@@ -906,6 +965,9 @@ _sfx_cooldown = {k: 0.0 for k in
 
 def play_sfx(name):
     if not AUDIO_OK:
+        # 导入时音频可能未就绪：首次播音再重试一次
+        _try_init_audio()
+    if not AUDIO_OK:
         return
     if _sfx_cooldown.get(name, 0) > 0:
         return
@@ -941,8 +1003,8 @@ ITEMS = {
 }
 # 豹灵符/药灵符是新散件；合成神符由 COMBINE_TABLE 处理。
 ITEMS.update({
-    "leopard_talisman": {"name": "豹灵符", "stats": {"population": 1}, "color": (180, 90, 255)},
-    "potion_talisman": {"name": "药灵符", "stats": {"population": 1}, "color": (180, 90, 255)},
+    "leopard_talisman": {"name": "豹灵符", "stats": {}, "color": (180, 90, 255)},
+    "potion_talisman": {"name": "药灵符", "stats": {}, "color": (180, 90, 255)},
 })
 ITEM_IDS = [iid for iid in ITEMS.keys() if iid not in ("leopard_talisman", "potion_talisman")]
 
@@ -1377,10 +1439,44 @@ def _make_augment_reward_item(kind):
     if kind == "special":
         return make_special_item(random.choice(["haotian_hammer", "disassembler", "mega_neeko", "radiant_chest", "masterwork_upgrader"]))
     if kind == "rare_bundle":
-        return random.choice([make_artifact_item(), random_radiant_item(), make_special_item("emblem_tome")])
+        return random.choice([make_artifact_item(), random_radiant_item(),
+                              make_special_item("masterwork_upgrader")])
     return None
 
+def make_emblem_tome_pseudo():
+    """纹章之书（备战席伪棋子）：is_pseudo_bench_only=True，不可上棋盘、不参战、不占用英雄池。"""
+    return {
+        "name": "EmblemTome", "cost": 0, "star": 1,
+        "hp": 1, "ad": 0, "max_mana": 1, "mana_per_attack": 0,
+        "attack_cooldown": 1.0, "sp_base_dmg": 0, "sp_multiplier": 0,
+        "attack_range": 100, "skill_desc": "Tome", "skill_type": "damage",
+        "traits": [], "role": "mage", "no_shop": True, "items": [],
+        "is_pseudo_bench_only": True, "pseudo_kind": "emblem_tome",
+    }
+
+def grant_emblem_tome(player):
+    """产出纹章之书：真人玩家→备战席伪棋子；AI→直接折现为随机纹章装备。"""
+    if player.get("is_ai"):
+        # AI 无法与伪棋子交互，直接获得随机纹章装备
+        valid = [t for t in TRAIT_DATA if t not in ("BearRidge", "RuneLand")]
+        item = make_trait_emblem(random.choice(valid))
+        if len(player.get("items", [])) < MAX_ITEM_BENCH:
+            player.setdefault("items", []).append(item)
+        else:
+            player.setdefault("free_item_store", []).append(item)
+        return True
+    empty = next((i for i, s in enumerate(player.get("bench", []))
+                  if s is None), None)
+    if empty is None:
+        player["_tome_grant_log"] = "备战席已满，纹章之书获取失败"
+        return False
+    player["bench"][empty] = make_emblem_tome_pseudo()
+    player["_tome_grant_log"] = f"纹章之书已放入备战席 {empty + 1}"
+    return True
+
 def _grant_augment_reward(player, reward_kind):
+    if reward_kind == "tome":
+        return grant_emblem_tome(player)
     item = _make_augment_reward_item(reward_kind)
     if item is None:
         return False
@@ -1460,17 +1556,18 @@ SPECIAL_ITEM_DATA = {
     "emblem_tome": ("纹章之书", "随机生成4个纹章供选择。"),
     "orb": ("法球", "打开后随机获得一种野怪掉落奖励。"),
     "artifact_forge": ("豹药神器锻造器", "随机获得一件豹药神器。"),
+    "giant_axe": ("巨斧选择器", "标记1名棋盘伐木弈子为伐木首领（仅备战阶段可用，可反复使用，不消耗）。"),
 }
 
 
 RUNE_ITEM_DATA = {
     "leopard": {
         "id": "leopard_talisman", "name": "豹灵符",
-        "desc": "与其他散件合成转职神符；装备后最大人口+1",
+        "desc": "合成材料；与药灵符或豹灵符合成转职神符",
     },
     "potion": {
         "id": "potion_talisman", "name": "药灵符",
-        "desc": "与其他散件合成转职神符；装备后最大人口+1",
+        "desc": "合成材料；与豹灵符或药灵符合成转职神符",
     },
     "leopard_potion": {
         "id": "leopard_potion_rune", "name": "豹药神符",
@@ -1489,10 +1586,14 @@ RUNE_ITEM_DATA = {
 
 def make_rune_item(kind):
     data = RUNE_ITEM_DATA.get(kind, RUNE_ITEM_DATA["leopard"])
+    # 只有合成出来的神符(leopard_potion/fat_leopard/rotten_potion)才加人口；
+    # 基础灵符(leopard/potion)只是材料，不加人口。
+    is_combined = kind not in ("leopard", "potion")
     return {
         "id": data["id"], "name": data["name"], "desc": data["desc"],
-        "stats": {"population": 1}, "color": (180, 90, 255),
-        "is_combined": kind not in ("leopard", "potion"),
+        "stats": {"population": 1} if is_combined else {},
+        "color": (180, 90, 255),
+        "is_combined": is_combined,
         "is_rune": True, "rune_kind": kind,
     }
 
@@ -1775,9 +1876,12 @@ def apply_bounty_reward(gs, reward):
                     "orb_" + str(random.randint(1, 999999)), "法球",
                     "野怪随机掉落物", {"special_kind": "orb"}))
         elif typ == "tome":
-            _add_bounty_item(gs, _bounty_item(
-                "emblem_tome", "纹章之书", "使用后选择4个随机纹章之一",
-                {"special_kind": "emblem_tome"}))
+            if grant_emblem_tome(gs.me):
+                gs.battle_log = gs.me.get("_tome_grant_log",
+                                          "纹章之书已放入备战席")
+            else:
+                gs.battle_log = gs.me.get("_tome_grant_log",
+                                          "备战席已满，纹章之书获取失败")
         elif typ == "rune":
             _add_bounty_item(gs, make_rune_item(kind[1]))
         elif typ == "special":
@@ -2076,6 +2180,11 @@ CHAMPION_LIST = [
      "attack_cooldown": 1.2, "sp_base_dmg": 200, "sp_multiplier": 2.0,
      "attack_range": RANGE_TANK, "star": 1, "skill_desc": "Ice Seal",
      "skill_type": "shield", "no_shop": True},
+    {"name": "AncientTree", "cost": 0, "traits": ["Summon"], "role": "tank",
+     "hp": 1800, "ad": 80, "max_mana": 60, "mana_per_attack": 8,
+     "attack_cooldown": 1.5, "sp_base_dmg": 350, "sp_multiplier": 2.2,
+     "attack_range": RANGE_TANK, "star": 1, "skill_desc": "Tree Smash",
+     "skill_type": "damage", "no_shop": True},
     {"name": "ThunderHelper", "cost": 1, "traits": ["Thunder"], "role": "mage",
  "hp": 500, "ad": 35, "max_mana": 20, "mana_per_attack": 15,
  "attack_cooldown": 1.3, "sp_base_dmg": 95, "sp_multiplier": 1.3,
@@ -2178,7 +2287,7 @@ CHAMPION_LIST = [
 TRAIT_DATA = {
     "PotionClan": [2, 4, 6, 8, 10], "LeopardKind": [2, 4, 6, 8, 10],
     "FrogTribe": [2, 4, 6],
-    "Lumber": [2, 4, 6, 8], "Dancer": [2, 3, 5], "Elder": [2, 3, 5],
+    "Lumber": [3, 5, 8], "Dancer": [2, 3, 5], "Elder": [2, 3, 5],
     "BearRidge": [3, 5, 7, 10], "RuneLand": [2, 4, 6, 8, 11],
     "Treasure": [3, 4, 5, 6, 8],
     "Thunder": [2, 4, 6, 8],
@@ -2194,7 +2303,10 @@ TRAIT_DESC = {
                     ["+18%", "+38%", "+60%", "+85%", "+115%"]),
     "FrogTribe": ("生命/治疗",
                   ["+8%/+15%", "+20%/+38%", "+35%/+65%"]),
-    "Lumber": ("最大生命", ["+12%", "+28%", "+48%", "+72%"]),
+    "Lumber": ("伐木首领",
+               ["(3) 首领吸收最近2名伐木90%基础生命，+60法强+60%物攻",
+                "(5) 全员+55法强+55%物攻，首领双倍",
+                "(8) 不吞噬，召唤远古树灵(全屏践踏)"]),
     "Dancer": ("攻速", ["+25%", "+45%", "+70%"]),
     "Elder": ("敌方攻击", ["-12%", "-22%", "-35%"]),
     "BearRidge": ("召唤团子", ["1星", "2星", "3星", "4星"]),
@@ -2579,6 +2691,19 @@ def get_bear_ridge_summon_star(player):
     return 0
 
 
+def get_lumber_tier(player):
+    """返回伐木羁绊激活档位：0=未激活, 1=(3), 2=(5), 3=(8)。"""
+    tc = count_traits(player)
+    cnt = tc.get("Lumber", 0)
+    if cnt >= 8:
+        return 3
+    if cnt >= 5:
+        return 2
+    if cnt >= 3:
+        return 1
+    return 0
+
+
 def get_treasure_gold(player):
     # v1.2.9：财宝猎人不再提供每回合固定金币，收益统一走收菜碎片。
     return 0
@@ -2601,9 +2726,6 @@ def apply_trait_buffs(player):
         elif trait == "LeopardKind":
             buffs["crit"] += _tier_val(
                 tier, [0.0, 0.18, 0.38, 0.60, 0.85, 1.15])
-        elif trait == "Lumber":
-            buffs["hp_mult"] += _tier_val(
-                tier, [0.0, 0.12, 0.28, 0.48, 0.72])
         elif trait == "FrogTribe":
             buffs["hp_mult"] += _tier_val(
                 tier, [0.0, 0.08, 0.20, 0.35])
@@ -2710,6 +2832,7 @@ def auto_fill_board(p):
     while cur < cap:
         candidates = [(i, p["bench"][i]) for i in range(8)
                       if p["bench"][i] is not None
+                      and not p["bench"][i].get("is_pseudo_bench_only")
                       and id(p["bench"][i]) not in board_ids]
         if not candidates:
             break
@@ -3332,7 +3455,7 @@ class BattleUnit:
         self.attack_range = self.base.get("attack_range", RANGE_WARRIOR)
         self.role = self.base.get("role", "warrior")
         self.is_ranged = self.role in ("archer", "mage")
-        self.is_summon = (self.base.get("name") == "Tuanzi")
+        self.is_summon = (self.base.get("name") in ("Tuanzi", "AncientTree"))
         self.skill_type = self.base.get("skill_type", "damage")
         self.muted = False
         self.shield = 0
@@ -3522,6 +3645,27 @@ class BattleUnit:
         sp_val = int(self.base["sp_base_dmg"] * self.base["sp_multiplier"]
                      * star_scale * self.sp_buff)
         name = self.base["name"]
+        if name == "AncientTree":
+            # 远古树灵专属技能：全屏践踏——对全体敌人造成伤害并短暂压制其攻击
+            dmg = sp_val
+            dmg_type = self.base.get("skill_dmg_type") or "physical"
+            for e in enemies:
+                if e.alive:
+                    e.take_damage(dmg, source=self, dmg_type=dmg_type)
+                    e.attack_cd_remain = max(e.attack_cd_remain, 1.2)
+                    effect_list.append({"type": "damage_pop", "x": e.x, "y": e.y,
+                                        "text": f"{dmg}", "life": 1.5,
+                                        "max_life": 1.5, "kind": "skill"})
+            effect_list.append({"type": "screen_flash", "life": 0.35,
+                                "max_life": 0.35, "color": (120, 200, 80)})
+            effect_list.append({"type": "ultimate_cross", "x": self.x,
+                                "y": self.y, "life": 0.6, "max_life": 0.6,
+                                "color": (120, 200, 80)})
+            self.current_mana = 0
+            self.skill_cd_remain = self.skill_cd_total
+            self.state = "skill"
+            self.anim_timer = 0.5
+            return
         if "火莲印" in self.artifact_flags:
             target0 = self._pick_skill_target(enemies)
             if target0 is not None:
@@ -3552,6 +3696,8 @@ class BattleUnit:
             ring_color = RUNE_COLOR
         elif name == "Tuanzi":
             ring_color = (180, 230, 255)
+        elif name == "AncientTree":
+            ring_color = (120, 200, 80)
         elif self.skill_type == "shield":
             ring_color = SHIELD_COLOR
         if is_3star_5cost:
@@ -3861,6 +4007,7 @@ class BattleInstance:
         self._activate_battle_artifacts(self.enemies, self.allies)
         self._spawn_treasure_capture(screen_w, screen_h)
         self._spawn_bear_ridge_summons(screen_w, screen_h, ally_buffs, enemy_buffs)
+        self._apply_lumber_mechanic(screen_w, screen_h, ally_buffs, enemy_buffs)
         for u in self.allies:
             u._artifact_allies = self.allies
             u._artifact_enemies = self.enemies
@@ -4018,6 +4165,90 @@ class BattleInstance:
                 tu.summon_flash_timer = 1.0
                 self.enemies.append(tu)
 
+    def _apply_lumber_mechanic(self, screen_w, screen_h, ally_buffs, enemy_buffs):
+        """伐木羁绊：选首领→吸收最近2个伐木弈子90%基础生命→按档位加攻法→(8)召唤树灵。"""
+        tier_a = get_lumber_tier(self.attacker)
+        if tier_a > 0:
+            self._do_lumber_side(self.allies, "ally", screen_w, screen_h, ally_buffs, tier_a)
+        tier_d = get_lumber_tier(self.defender)
+        if tier_d > 0:
+            self._do_lumber_side(self.enemies, "enemy", screen_w, screen_h, enemy_buffs, tier_d)
+
+    def _do_lumber_side(self, units, side, screen_w, screen_h, buffs, tier):
+        lumber_units = [u for u in units
+                        if "Lumber" in u.base.get("traits", []) and u.alive]
+        if not lumber_units:
+            return
+        # 首领选择：巨斧选择器手动标记优先；存在手动标记则完全关闭自动选首领逻辑。
+        manual = [u for u in lumber_units if u.base.get("is_lumber_chief")]
+        if manual:
+            leader = manual[0]
+        else:
+            # 无手动标记：自动选场上最高费 → 最高星伐木弈子
+            lumber_units.sort(key=lambda u: (-u.base.get("cost", 1),
+                                             -u.base.get("star", 1)))
+            leader = lumber_units[0]
+        if tier >= 3:
+            # 8伐木（棱彩终极羁绊）：不吞噬任何己方棋子；全员+55%，首领双倍；召唤远古树灵
+            for u in lumber_units:
+                mult = 2.10 if u is leader else 1.55
+                u.sp_buff *= mult
+                u.atk_buff *= mult
+            self._spawn_lumber_tree(units, leader, lumber_units, side,
+                                    screen_w, screen_h, buffs)
+            return
+        # 3/5伐木：首领吸收距离自己最近2个伐木弈子90%基础生命（战斗内临时生命，被吸收棋子不死亡）
+        others = [u for u in lumber_units if u is not leader]
+        others.sort(key=lambda u: (u.x - leader.x) ** 2 + (u.y - leader.y) ** 2)
+        absorbed = others[:2]
+        bonus_hp = sum(int(u.base["hp"] * 0.90) for u in absorbed)
+        if bonus_hp > 0:
+            leader.base["hp"] += bonus_hp
+            leader.current_hp = leader.base["hp"]
+            leader._lumber_hp_bonus = bonus_hp
+        if tier == 1:
+            # 3伐木：仅给首领施加战斗内临时属性 +60法强 / +60%物理加成
+            leader.sp_buff *= 1.60
+            leader.atk_buff *= 1.60
+        else:
+            # 5伐木：全部伐木弈子 +55法强/+55%物攻，首领获得该数值双倍加成(+110%)
+            for u in lumber_units:
+                mult = 2.10 if u is leader else 1.55
+                u.sp_buff *= mult
+                u.atk_buff *= mult
+
+    def _spawn_lumber_tree(self, units, leader, lumber_units, side,
+                           screen_w, screen_h, buffs):
+        """8伐木：召唤远古树灵，继承全部伐木弈子75%生命/攻击，继承首领全部装备。"""
+        tree_data = make_unit_with_star("AncientTree", 1)
+        if not tree_data:
+            return
+        total_hp = sum(u.base["hp"] for u in lumber_units)
+        total_ad = sum(u.base["ad"] for u in lumber_units)
+        tree_data["hp"] = max(1, int(total_hp * 0.75))
+        tree_data["ad"] = max(1, int(total_ad * 0.75))
+        tree_data["items"] = copy.deepcopy(leader.base.get("items", []))
+        used = [(u.x, u.y) for u in units]
+        cy = screen_h * 0.60 if side == "ally" else screen_h * 0.40
+        tx, ty = self._find_free_position(
+            screen_w * 0.5, cy, used, screen_w, screen_h, units)
+        tree = BattleUnit(tree_data, tx, ty, side, buffs,
+                          size=units[0].size if units else 48)
+        tree.is_summon = True
+        tree.summon_flash_timer = 1.0
+        tree.is_lumber_tree = True
+        units.append(tree)
+        self.effects.append({
+            "type": "trait_activate",
+            "trait_key": "Lumber",
+            "trait_name": "远古树灵降临",
+            "tier": 3,
+            "x": tree.x, "y": tree.y - 40,
+            "life": 2.0, "max_life": 2.0,
+            "color": (120, 200, 80),
+            "side": side,
+        })
+
     def _find_free_position(self, cx, cy, used, screen_w, screen_h, unit_list):
         min_dist = (unit_list[0].size if unit_list else 48) * 1.2
         best_pos = (cx, cy)
@@ -4067,6 +4298,8 @@ class BattleInstance:
                 x = pad_x + (c + 0.5) * cell_w
                 bu = BattleUnit(u, x, y, side, buffs, size=size)
                 bu.owner_player = player
+                bu.source_unit = u
+                bu.source_coords = (r, c)
                 if side == "enemy" and player.get("_skill_plunder_block"):
                     bu.base["_plunder_skill_block"] = True
                 units.append(bu)
@@ -4107,6 +4340,15 @@ class BattleInstance:
         if len(self.effects) > 150:
             self.effects = self.effects[-80:]
 
+    def _clear_lumber_temp(self):
+        """战斗结束：清除首领全部战斗临时属性加成（吸收的生命为战斗临时值）。"""
+        for u in self.allies + self.enemies:
+            bonus = getattr(u, "_lumber_hp_bonus", 0)
+            if bonus:
+                u.base["hp"] = max(1, u.base["hp"] - bonus)
+                u._lumber_hp_bonus = 0
+                u.current_hp = min(u.current_hp, u.base["hp"])
+
     def _finish(self, alive_a, alive_e):
         self.finished = True
         if alive_a and not alive_e:
@@ -4115,6 +4357,12 @@ class BattleInstance:
             self.winner = 'defender'
         else:
             self.winner = 'draw'
+        self._clear_lumber_temp()
+        # 战斗结束：销毁远古树灵（不参与战果记录/存活计数；巨斧首领标记保留在玩家棋盘）
+        self.allies = [u for u in self.allies
+                       if not getattr(u, "is_lumber_tree", False)]
+        self.enemies = [u for u in self.enemies
+                        if not getattr(u, "is_lumber_tree", False)]
 
     def force_end(self):
         if self.finished:
@@ -4142,6 +4390,8 @@ class GameState:
 
         ai_mult = DIFFICULTY_MULT.get(difficulty, 1.0)
         self.me = create_empty_player(gold=START_GOLD_PLAYER, is_ai=False)
+        # 巨斧选择器：物品栏常驻特殊道具，不消耗，可反复使用
+        self.me.setdefault("items", []).append(make_special_item("giant_axe"))
         if self.is_multiplayer:
             self.players = []
             self.me["gold"] = 30
@@ -4169,6 +4419,16 @@ class GameState:
         self.drag_idx1 = -1
         self.drag_idx2 = -1
         self.drag_unit = None
+        self.detail_source_type = None
+        self.detail_i1 = -1
+        self.detail_i2 = -1
+        self._detail_sell_rect = None
+        self.show_battle_bench = False
+        self._battle_bench_toggle_rect = None
+        self._battle_sell_rect = None
+        self._battle_ally_hit_rects = []
+        self._trait_scroll = 0
+        self._trait_max_scroll = 0
         self.mouse_down_pos = (0, 0)
         self.battle_result_timer = 0.0
         self.battle_result_text = ""
@@ -4183,6 +4443,7 @@ class GameState:
         self.watched_battle_idx = 0
         self.battle_phase_timer = 0.0
         self.battle_phase_resolved = False
+        self._overtime_active = False
         self.post_battle_timer = 0.0
         self._fixed_accum = 0.0
         self.game_over = False
@@ -4201,6 +4462,8 @@ class GameState:
         self._item_choice_source_index = -1
         self._item_choice_target = None
         self._item_choice_rects = []
+        self._tome_bench_idx = None
+        self._tome_close_rect = None
         self.show_carousel = False
         self.carousel_options = []
         self.carousel_selected = -1
@@ -4405,6 +4668,11 @@ class GameState:
         if unit is None:
             return False, 0
         safe_unit(unit)
+        # 纹章之书伪棋子：出售动作 → 打开4选1纹章弹窗（伪棋子保留）
+        if unit.get("is_pseudo_bench_only") and unit.get("pseudo_kind") == "emblem_tome":
+            if source_type != "bench":
+                return False, 0
+            return self._open_tome_choice(i1), 0
         carried_items = list(unit.get("items", []))
         if len(self.me["items"]) + len(carried_items) > MAX_ITEM_BENCH:
             self.battle_log = "装备备战席已满，请先腾出空间再出售棋子!"
@@ -4425,8 +4693,46 @@ class GameState:
         self.battle_log = f"出售 {champ_cn(unit['name'])} {star}星 +{refund}金"
         play_sfx("sell")
         enforce_population_cap(self.me)
+        self.sync_lumber_marks()
         save_game(self)
         return True, refund
+
+    def sync_lumber_marks(self):
+        """伐木羁绊计数<3时，清空全部巨斧首领标记（跨回合持久，仅两种条件清除之一）。"""
+        p = self.me
+        if get_lumber_tier(p) == 0:
+            for row in p["board"]:
+                for u in row:
+                    if u is not None:
+                        u.pop("is_lumber_chief", None)
+            for u in p["bench"]:
+                if u is not None:
+                    u.pop("is_lumber_chief", None)
+
+    def try_combine_item_bench(self, i, j):
+        """物品栏内两个散件拖拽重叠直接合成；成装/神符/神器/光明/特殊道具禁止参与。"""
+        items = self.me["items"]
+        if i == j or not (0 <= i < len(items) and 0 <= j < len(items)):
+            return False
+        a, b = items[i], items[j]
+        if a.get("is_combined") or b.get("is_combined"):
+            self._toast_msg("成装/神符/神器/光明/特殊道具不能参与物品栏合成")
+            play_sfx("error")
+            return False
+        new_items, ok = try_combine_items([a, b])
+        if not ok:
+            self._toast_msg("这两个散件无法合成")
+            play_sfx("error")
+            return False
+        hi, lo = (i, j) if i > j else (j, i)
+        items.pop(hi)
+        items.pop(lo)
+        items.insert(lo, new_items[0])
+        self.battle_log = (f"物品栏合成：{a['name']} + {b['name']} = "
+                           f"{new_items[0]['name']}")
+        play_sfx("hex")
+        self._flush_free_item_store()
+        return True
 
     def buy_xp(self):
         if self.me["level"] >= MAX_LEVEL:
@@ -4469,7 +4775,7 @@ class GameState:
         return next((i for i, it in enumerate(self.me.get("items", []))
                      if it is item_ref), -1)
 
-    def use_special_item(self, item_ref, target_unit):
+    def use_special_item(self, item_ref, target_unit, target_source=None):
         idx = self._special_item_index(item_ref)
         if idx < 0 or target_unit is None:
             return False
@@ -4477,9 +4783,40 @@ class GameState:
         kind = item.get("special_kind")
         if kind not in SPECIAL_ITEM_DATA:
             return False
-        target = safe_unit(target_unit)
-        if target is None:
+        # 必须直接操作真棋子(safe_unit会返回浅拷贝，会导致拆卸/重铸等修改不落盘)
+        if not isinstance(target_unit, dict):
             return False
+        target = target_unit
+        if target.get("is_pseudo_bench_only"):
+            self._toast_msg("纹章之书是消耗型伪棋子，不能使用道具")
+            play_sfx("error")
+            return False
+        target.setdefault("items", [])
+
+        if kind == "giant_axe":
+            # 巨斧选择器：仅备战阶段可用；只允许拖拽到棋盘上已上场的伐木弈子。
+            if self.is_battle_phase:
+                self._toast_msg("战斗阶段无法使用巨斧选择器！")
+                play_sfx("error")
+                return False
+            if target_source != "board":
+                self._toast_msg("巨斧选择器只能拖拽到棋盘上已上场的伐木弈子！")
+                play_sfx("error")
+                return False
+            if "Lumber" not in target.get("traits", []):
+                self._toast_msg("目标不是伐木羁绊棋子，无法标记为伐木首领！")
+                play_sfx("error")
+                return False
+            # 新标记覆盖旧标记：先清空全部旧标记
+            for row in self.me["board"]:
+                for u in row:
+                    if u is not None:
+                        u.pop("is_lumber_chief", None)
+            target["is_lumber_chief"] = True
+            self.battle_log = (f"巨斧选择器：{champ_cn(target['name'])} "
+                               f"已标记为伐木首领（道具不消耗）")
+            play_sfx("hex")
+            return True
 
         if kind == "orb":
             self.me["items"].pop(idx)
@@ -4503,31 +4840,61 @@ class GameState:
             return True
 
         if kind == "disassembler":
+            # 战斗阶段禁止对棋盘战斗棋子拆卸
+            if self.is_battle_phase and target_source == "board":
+                self._toast_msg("战斗阶段无法拆卸棋盘上正在对战的棋子装备！")
+                play_sfx("error")
+                return False
+            if not target.get("items"):
+                self._toast_msg("目标身上没有装备，无法拆卸！")
+                play_sfx("error")
+                return False
             self.me["items"].pop(idx)
             self.me["items"].append(make_special_item("disassembler"))
-            self.me["items"].extend(target.get("items", []))
+            removed = list(target.get("items", []))
             target["items"] = []
+            for it in removed:
+                if len(self.me["items"]) < MAX_ITEM_BENCH:
+                    self.me["items"].append(it)
+                else:
+                    self.me.setdefault("free_item_store", []).append(it)
             self.battle_log = f"拆卸器：已拆下 {champ_cn(target['name'])} 的全部装备"
             self._flush_free_item_store()
             return True
 
         if kind == "haotian_hammer":
-            if not target.get("items"):
+            # 战斗阶段禁止对棋盘战斗棋子重铸
+            if self.is_battle_phase and target_source == "board":
+                self._toast_msg("战斗阶段无法对棋盘上正在对战的棋子使用昊天锤！")
+                play_sfx("error")
                 return False
+            if not target.get("items"):
+                self._toast_msg("目标身上没有装备，无法重铸！")
+                play_sfx("error")
+                return False
+            # 完整流程：卸下全部装备 → 重铸 → 全部装回原棋子
             old_items = list(target["items"])
+            target["items"] = []
             target["items"] = [_reroll_item(it) for it in old_items]
             self.me["items"].pop(idx)
             self.battle_log = (f"昊天锤：重铸 {champ_cn(target['name'])} "
                                f"身上全部 {len(old_items)} 件装备")
+            play_sfx("hex")
             return True
 
         if kind == "masterwork_upgrader":
+            if self.is_battle_phase and target_source == "board":
+                self._toast_msg("战斗阶段无法对棋盘战斗棋子升级装备！")
+                play_sfx("error")
+                return False
             candidates = [it for it in target.get("items", [])
                           if it.get("is_combined") and not it.get("is_rune")
                           and not it.get("is_special") and not it.get("is_radiant")]
             choices = [make_radiant_item(it.get("name", "")) for it in candidates]
             choices = [x for x in choices if x]
             if not choices:
+                self._toast_msg("目标身上没有可升级的成装！")
+                play_sfx("error")
                 return False
             if len(choices) == 1:
                 target["items"].remove(candidates[0])
@@ -4545,20 +4912,30 @@ class GameState:
             return True
 
         if kind == "mega_neeko":
-            empty=next((i for i,x in enumerate(self.me["bench"]) if x is None),None)
+            # 大妮蔻：备战/战斗阶段、棋盘/备战席目标均可用；备战席满则道具不消耗
+            empty = next((i for i, x in enumerate(self.me["bench"])
+                          if x is None), None)
             if empty is None:
-                self.me.setdefault("free_item_store", []).append(make_special_item("mega_neeko"))
+                self._toast_msg("备战席已满！大妮蔻不消耗")
+                play_sfx("error")
                 return False
-            clone=make_unit_with_star(target["name"],1)
+            clone = make_unit_with_star(target["name"], 1)
             if clone is None:
+                self._toast_msg("无法复制该目标")
+                play_sfx("error")
                 return False
-            self.me["bench"][empty]=clone
+            self.me["bench"][empty] = clone
             self.me["items"].pop(idx)
-            consume_pool(target["name"],1)
-            self.battle_log=f"大妮蔻：复制 {champ_cn(target['name'])} 1星"
+            consume_pool(target["name"], 1)
+            self.battle_log = f"大妮蔻：复制 {champ_cn(target['name'])} 1星"
+            play_sfx("hex")
             return True
 
         if kind == "radiant_chest":
+            if self.is_battle_phase and target_source == "board":
+                self._toast_msg("战斗阶段无法对棋盘战斗棋子使用光明宝箱！")
+                play_sfx("error")
+                return False
             choices=[]
             for it in target.get("items", []):
                 if it.get("is_combined") and not it.get("is_radiant") and not it.get("is_special") and not it.get("is_rune"):
@@ -4582,6 +4959,7 @@ class GameState:
             return True
 
         if kind == "emblem_tome":
+            # 旧存档遗留的物品型纹章之书：仍可直接使用（新产出走备战席伪棋子）
             self._emblem_tome_choices=random.sample(
                 [t for t in TRAIT_DATA if t not in ("BearRidge","RuneLand")],
                 min(4, len([t for t in TRAIT_DATA if t not in ("BearRidge","RuneLand")]))
@@ -4589,6 +4967,7 @@ class GameState:
             self.show_item_choice_popup=True
             self._item_choice_source_index=idx
             self._item_choice_target=None
+            self._tome_bench_idx=None
             self.battle_log="纹章之书：请选择一个随机纹章"
             return True
         return False
@@ -4634,21 +5013,51 @@ class GameState:
         choices=getattr(self,"_emblem_tome_choices",None)
         if choices and 0 <= choice_idx < len(choices):
             trait=choices[choice_idx]
-            self.me["items"].pop(source_idx)
+            bench_idx=getattr(self,"_tome_bench_idx",None)
+            if bench_idx is not None and 0 <= bench_idx < len(self.me["bench"]) \
+                    and self.me["bench"][bench_idx] is not None \
+                    and self.me["bench"][bench_idx].get("is_pseudo_bench_only"):
+                # 伪棋子路径：消耗备战席上的纹章之书
+                self.me["bench"][bench_idx]=None
+            elif 0 <= source_idx < len(self.me["items"]):
+                # 旧存档物品路径：消耗物品栏中的纹章之书
+                self.me["items"].pop(source_idx)
             _add_bounty_item(self, make_trait_emblem(trait))
             self._emblem_tome_choices=None
+            self._tome_bench_idx=None
             self.show_item_choice_popup=False
             self.battle_log=f"纹章之书：获得{trait_cn(trait)}纹章"
             self._flush_free_item_store()
             return True
         return False
 
+    def _open_tome_choice(self, bench_idx):
+        """出售动作触发：纹章之书伪棋子 → 4选1纹章弹窗（伪棋子保留在备战席）。"""
+        valid=[t for t in TRAIT_DATA if t not in ("BearRidge","RuneLand")]
+        self._emblem_tome_choices=random.sample(valid, min(4, len(valid)))
+        self._tome_bench_idx=bench_idx
+        self._item_choice_source_index=-1
+        self._item_choice_target=None
+        self.show_item_choice_popup=True
+        self.battle_log="纹章之书：请选择一个随机纹章"
+        return True
+
+    def close_item_choice_popup(self):
+        """关闭纹章选择弹窗：放弃选择，伪棋子/道具均保留。"""
+        self.show_item_choice_popup=False
+        self._emblem_tome_choices=None
+        self._radiant_chest_choices=None
+        self._masterwork_choices=None
+        self._masterwork_old_items=None
+        self._tome_bench_idx=None
+        self.battle_log="已放弃选择，纹章之书保留"
+
     def _flush_free_item_store(self):
         store = self.me.setdefault("free_item_store", [])
         while store and len(self.me["items"]) < MAX_ITEM_BENCH:
             self.me["items"].append(store.pop(0))
 
-    def equip_item_to(self, item_ref, source_type, i1, i2=-1):
+    def equip_item_to(self, item_ref, source_type, i1, i2=-1, allow_combine=True):
         if isinstance(item_ref, int):
             item_idx = item_ref
         else:
@@ -4667,10 +5076,9 @@ class GameState:
         if unit is None:
             play_sfx("error")
             return False
-        if len(unit.get("items", [])) >= MAX_ITEMS_PER_UNIT:
+        if unit.get("is_pseudo_bench_only"):
             play_sfx("error")
-            self.battle_log = f"{champ_cn(unit['name'])} 装备已满!"
-            self._toast_msg("装备已满!")
+            self._toast_msg("纹章之书不能装备道具")
             return False
         item = self.me["items"][item_idx]
         # 转职规则：同一棋子不能重复装备同一种转职；
@@ -4692,9 +5100,24 @@ class GameState:
                         f"{champ_cn(unit['name'])} 已装备「{trait_cn(trait)}」转职，不能重复装备")
                     self._toast_msg("同一转职不能重复装备")
                     return False
-        if item.get("is_special") and not item.get("is_emblem"):
+        # 神器(is_artifact)应像普通成装一样装备到棋子身上，
+        # 由战斗逻辑从棋子 items 里读取；不能走 use_special_item 消耗掉。
+        if item.get("is_special") and not item.get("is_emblem") and not item.get("is_artifact"):
             # 特殊道具拖到棋子上即执行；普通装备/纹章才真正挂到棋子装备栏。
-            return self.use_special_item(item, unit)
+            return self.use_special_item(item, unit, source_type)
+        # 满编判断：若已达3件，只有当拖入散件能与已有散件合成(件数不超上限)时才允许
+        if len(unit.get("items", [])) >= MAX_ITEMS_PER_UNIT:
+            if not allow_combine:
+                play_sfx("error")
+                self.battle_log = f"{champ_cn(unit['name'])} 装备已满!"
+                self._toast_msg("装备已满!")
+                return False
+            trial = try_combine_items_all(unit.get("items", []) + [item])
+            if len(trial) > MAX_ITEMS_PER_UNIT:
+                play_sfx("error")
+                self.battle_log = f"{champ_cn(unit['name'])} 装备已满!"
+                self._toast_msg("装备已满!")
+                return False
         item = self.me["items"].pop(item_idx)
         unit.setdefault("items", []).append(item)
         if item.get("is_emblem"):
@@ -4703,11 +5126,12 @@ class GameState:
                 unit.setdefault("traits", []).append(trait)
         play_sfx("coin")
         self.battle_log = f"装备 {item['name']} 给 {champ_cn(unit['name'])}"
-        before_len = len(unit["items"])
-        unit["items"] = try_combine_items_all(unit["items"])
-        if len(unit["items"]) < before_len:
-            self.battle_log = "装备合成成功!"
-            play_sfx("hex")
+        if allow_combine:
+            before_len = len(unit["items"])
+            unit["items"] = try_combine_items_all(unit["items"])
+            if len(unit["items"]) < before_len:
+                self.battle_log = "装备合成成功!"
+                play_sfx("hex")
         enforce_population_cap(self.me)
         self._flush_free_item_store()
         return True
@@ -4735,6 +5159,7 @@ class GameState:
         self.watched_battle_idx = 0
         self.battle_phase_timer = BATTLE_DURATION
         self.battle_phase_resolved = False
+        self._overtime_active = False
         self.post_battle_timer = 0.0
         self._fixed_accum = 0.0
         self.is_battle_phase = True
@@ -4763,7 +5188,7 @@ class GameState:
         if stage == 1 and rnd == 1:
             return
 
-        
+        self.sync_lumber_marks()
         all_players = [self.me] + self.players
         for ai_p in self.players:
             if ai_p["hp"] > 0:
@@ -4824,6 +5249,7 @@ class GameState:
             (i for i, bt in enumerate(self.battles) if bt.is_player_battle), 0)
         self.battle_phase_timer = BATTLE_DURATION
         self.battle_phase_resolved = False
+        self._overtime_active = False
         self.post_battle_timer = 0.0
         self._fixed_accum = 0.0
         self.is_battle_phase = True
@@ -4892,6 +5318,7 @@ class GameState:
         self.watched_battle_idx = 0
         self.battle_phase_timer = BATTLE_DURATION
         self.battle_phase_resolved = False
+        self._overtime_active = False
         self.post_battle_timer = 0.0
         self._fixed_accum = 0.0
         self.is_battle_phase = True
@@ -4921,8 +5348,23 @@ class GameState:
             return
         self.battle_phase_timer -= dt
         if self.battle_phase_timer <= 0:
-            for battle in self.battles:
-                battle.force_end()
+            # 加时赛：首次归零时若仍有战斗双方都有存活单位，强化残血继续打，不立刻判平
+            undecided = [b for b in self.battles
+                          if not b.finished
+                          and any(u.alive for u in b.allies)
+                          and any(u.alive for u in b.enemies)]
+            if undecided and not self._overtime_active:
+                self._overtime_active = True
+                self.battle_phase_timer = OVERTIME_DURATION
+                for b in undecided:
+                    for u in b.allies + b.enemies:
+                        if u.alive:
+                            u.atk_buff *= 2.0        # 加时伤害翻倍
+                            u.atk_speed_mult *= 1.8  # 加时攻速大幅提升
+                self.battle_log = "加时赛！残血激战"
+            else:
+                for battle in self.battles:
+                    battle.force_end()
         if all(b.finished for b in self.battles):
             self._resolve_all_battles()
             self.battle_phase_resolved = True
@@ -5028,7 +5470,7 @@ class GameState:
                     self.battle_result_text = "胜利!"
                     self.battle_result_color = GOLD_COLOR
                     play_sfx("victory")
-                    self._monster_drop(stage)
+                    self._monster_drop(stage, rnd)
                 self.battle_result_timer = 2.0
                 continue
 
@@ -5075,11 +5517,19 @@ class GameState:
                 self.battle_result_color = GOLD_COLOR
             self.battle_result_timer = 2.0
 
-    def _monster_drop(self, stage):
+    def _monster_drop(self, stage, rnd=1):
         drops = []
         gold_drop = random.randint(2, 4) + stage
         self.me["gold"] += gold_drop
         drops.append(f"+{gold_drop} 金")
+        # 2-1 野怪回合100%掉落装备拆卸器（物品栏满则暂存溢出仓库，稍后自动回栏）
+        if stage == 2 and rnd == 1:
+            if len(self.me["items"]) < MAX_ITEM_BENCH:
+                self.me["items"].append(make_special_item("disassembler"))
+            else:
+                self.me.setdefault("free_item_store", []).append(
+                    make_special_item("disassembler"))
+            drops.append("装备拆卸器")
         drop_count = 1
         if stage >= 3:
             drop_count = 2
@@ -5324,6 +5774,7 @@ class GameState:
     def _advance_to_next_round(self):
         self.is_battle_phase = False
         self.battle_phase_resolved = False
+        self.sync_lumber_marks()
         capture = self.me.pop("_bounty_capture_shards", 0)
         if capture:
             self.bounty_shards += capture
@@ -5346,8 +5797,9 @@ class GameState:
                 else:
                     self.stage = (stage + 1, 1)
             self.battles = []
-            self.shop_locked = False
-            self.refresh_shop()
+            # 商店锁定：锁定后回合切换保留当前商店，不自动刷新
+            if not self.shop_locked:
+                self.refresh_shop()
             self.multiplayer_phase = "prep"
             self.phase_timer = 999999
             apply_income_and_xp(self.me)
@@ -5387,6 +5839,8 @@ class GameState:
               if p["hp"] > 0:
                    apply_income_and_xp(p)
         self.phase_timer = PREP_DURATION
+        # 每回合自动回收满栏时被挤入溢出仓库的物品
+        self._flush_free_item_store()
         if self.me["hp"] <= 0:
             self.me["hp"] = 0
             self.game_over = True
@@ -5401,8 +5855,9 @@ class GameState:
             play_sfx("victory")
             return
         self.battles = []
-        self.shop_locked = False
-        self.refresh_shop()
+        # 商店锁定：锁定后回合切换保留当前商店，不自动刷新
+        if not self.shop_locked:
+            self.refresh_shop()
         self.round_counter += 1
         if self.round_counter >= HEX_ROUND_INTERVAL:
             self.round_counter = 0
@@ -5591,8 +6046,20 @@ def draw_item_path_popup(screen, gs, font_lg, font_md, font_sm, W, H, mouse_pos)
                   py + 28, font_lg, GOLD_COLOR)
         draw_text(screen, "合成装备 · 属性详情", icon_r.right + 16,
                   py + 58, font_sm, TEXT_DIM)
-        draw_text(screen, item_stat_text(item), px + 20, py + 118,
-                  font_md, TEXT_WHITE)
+        # 成装详情：优先显示效果描述(神器/光明等)，再叠加数值属性
+        stat_txt = item_stat_text(item)
+        desc_txt = (item.get("desc") or "").strip()
+        # 描述里已提到“人口”时，属性行不要重复再打印“人口+N”
+        if desc_txt and "人口" in desc_txt and stat_txt and stat_txt != "无属性":
+            stat_txt = " ".join(t for t in stat_txt.split() if "人口" not in t)
+        disp_parts = []
+        if desc_txt:
+            disp_parts.append(desc_txt)
+        if stat_txt and stat_txt != "无属性":
+            disp_parts.append(stat_txt)
+        if not disp_parts:
+            disp_parts.append("无属性")
+        draw_text(screen, "  ".join(disp_parts), px + 20, py + 118, font_md, TEXT_WHITE)
         draw_text(screen, "合成装备无法拆分；升星溢出装备会返还至物品栏。",
                   px + 20, py + 154, font_sm, TEXT_DIM)
         close_btn = pygame.Rect(W // 2 - 90, box.bottom - 62, 180, 44)
@@ -5686,62 +6153,99 @@ def draw_item_path_popup(screen, gs, font_lg, font_md, font_sm, W, H, mouse_pos)
 
 
 def draw_panel(surface, rect, fill_col=PANEL_COLOR, border_col=BORDER_LIGHT,
-               radius=8, border_w=2):
+               radius=10, border_w=2):
     try:
+        # 底部阴影
+        shadow = pygame.Rect(rect.x + 2, rect.y + 3, rect.w, rect.h)
+        pygame.draw.rect(surface, (0, 0, 0, 60), shadow, border_radius=radius)
         pygame.draw.rect(surface, fill_col, rect, border_radius=radius)
         pygame.draw.rect(surface, border_col, rect, width=border_w, border_radius=radius)
     except Exception:
         pass
 
 
-def draw_button(surface, rect, fill_col, border_col, radius=8):
+def draw_button(surface, rect, fill_col, border_col, radius=10):
     try:
+        shadow = pygame.Rect(rect.x + 1, rect.y + 2, rect.w, rect.h)
+        pygame.draw.rect(surface, (0, 0, 0, 80), shadow, border_radius=radius)
         pygame.draw.rect(surface, fill_col, rect, border_radius=radius)
         pygame.draw.rect(surface, border_col, rect, width=2, border_radius=radius)
     except Exception:
         pass
 
 
+def draw_axe_icon(surface, cx, cy, size):
+    """在 (cx, cy) 绘制小斧头角标（木柄 + 金色斧刃）。"""
+    try:
+        s2 = size / 2.0
+        pygame.draw.line(surface, (140, 100, 60),
+                         (int(cx - s2 * 0.7), int(cy + s2 * 0.7)),
+                         (int(cx + s2 * 0.6), int(cy - s2 * 0.8)),
+                         max(2, size // 6))
+        pygame.draw.polygon(surface, (225, 200, 130),
+                            [(int(cx - s2 * 0.2), int(cy - s2 * 1.1)),
+                             (int(cx + s2 * 0.9), int(cy - s2 * 0.5)),
+                             (int(cx + s2 * 0.9), int(cy - s2 * 0.1))])
+        pygame.draw.polygon(surface, (250, 235, 175),
+                            [(int(cx - s2 * 0.2), int(cy - s2 * 1.1)),
+                             (int(cx + s2 * 0.9), int(cy - s2 * 0.5)),
+                             (int(cx + s2 * 0.9), int(cy - s2 * 0.1))], 1)
+    except Exception:
+        pass
+
+
 def draw_unit_cell(surface, r, unit, font_sm, font_md, is_drag_src=False):
     try:
+        if unit.get("is_pseudo_bench_only"):
+            # 纹章之书（备战席伪棋子）：书本样式
+            pygame.draw.rect(surface, (58, 46, 18), r, border_radius=7)
+            pygame.draw.rect(surface, (230, 190, 90), r, width=2, border_radius=7)
+            draw_text(surface, "书", r.centerx, r.centery - 8,
+                      font_sm, (250, 220, 140), align_center=True)
+            draw_text(surface, "纹章之书", r.centerx, r.centery + 8,
+                      font_sm, (250, 220, 140), align_center=True)
+            return
         star = unit.get("star", 1)
         border = STAR_BORDER.get(star, STAR_BORDER[1])
         cost = unit.get("cost", 1)
         traits = unit.get("traits", [])
-        bg = (35, 38, 50)
+        bg = (28, 31, 44)
         if "BearRidge" in traits:
-            bg = (50, 38, 25)
+            bg = (48, 36, 24)
         elif "RuneLand" in traits:
-            bg = (28, 38, 55)
+            bg = (26, 36, 54)
         elif "Treasure" in traits:
-            bg = (55, 45, 15)
-        pygame.draw.rect(surface, bg, r, border_radius=6)
+            bg = (52, 42, 14)
+        pygame.draw.rect(surface, bg, r, border_radius=7)
         if "BearRidge" in traits:
-            pygame.draw.rect(surface, BEAR_COLOR, r.inflate(4, 4), width=2, border_radius=7)
+            pygame.draw.rect(surface, BEAR_COLOR, r.inflate(3, 3), width=2, border_radius=8)
         elif "RuneLand" in traits:
-            pygame.draw.rect(surface, RUNE_COLOR, r.inflate(4, 4), width=2, border_radius=7)
+            pygame.draw.rect(surface, RUNE_COLOR, r.inflate(3, 3), width=2, border_radius=8)
         elif "Treasure" in traits:
-            pygame.draw.rect(surface, TREASURE_COLOR, r.inflate(4, 4), width=2, border_radius=7)
-        pygame.draw.rect(surface, border, r, width=3, border_radius=6)
+            pygame.draw.rect(surface, TREASURE_COLOR, r.inflate(3, 3), width=2, border_radius=8)
+        pygame.draw.rect(surface, border, r, width=2, border_radius=7)
         if is_drag_src:
             return
         name_col = COST_COLORS.get(cost, TEXT_WHITE)
         draw_text(surface, champ_cn(unit.get("name", "?"))[:4],
-                  r.centerx, r.centery - 5, font_sm, name_col, align_center=True)
-        draw_text(surface, f"{star}星", r.centerx, r.centery + 8,
+                  r.centerx, r.centery - 4, font_sm, name_col, align_center=True)
+        draw_text(surface, f"{'★' * star}", r.centerx, r.centery + 9,
                   font_sm, border, align_center=True)
         role = unit.get("role", "warrior")
         role_col = ROLE_COLORS.get(role, TEXT_DIM)
         role_txt = ROLE_SHORT.get(role, "?")
-        badge = pygame.Rect(r.x + 2, r.y + 2, 13, 13)
-        pygame.draw.rect(surface, (15, 15, 20), badge, border_radius=3)
-        pygame.draw.rect(surface, role_col, badge, width=1, border_radius=3)
+        badge = pygame.Rect(r.x + 2, r.y + 2, 14, 14)
+        pygame.draw.rect(surface, (10, 10, 16), badge, border_radius=4)
+        pygame.draw.rect(surface, role_col, badge, width=1, border_radius=4)
         draw_text(surface, role_txt, badge.centerx, badge.centery, font_sm, role_col, True)
+        # 巨斧选择器标记：棋盘角落绘制巨斧小图标
+        if unit.get("is_lumber_chief"):
+            draw_axe_icon(surface, r.right - 8, r.y + 8, 14)
         items = unit.get("items", [])
         if items:
-            i_size = 9
-            ix = r.right - 2 - i_size
-            iy = r.bottom - 2 - i_size
+            i_size = 10
+            ix = r.right - 3 - i_size
+            iy = r.bottom - 3 - i_size
             for item in reversed(items[-3:]):
                 ir = pygame.Rect(ix, iy, i_size, i_size)
                 draw_item_icon(surface, ir, item)
@@ -5753,6 +6257,9 @@ def draw_unit_cell(surface, r, unit, font_sm, font_md, is_drag_src=False):
 def draw_battle_unit(screen, unit, font_sm, is_ally):
     cx, cy = int(unit.x), int(unit.y)
     size = unit.size
+    is_chief = bool(unit.base.get("is_lumber_chief"))
+    if is_chief:
+        size = int(size * 1.2)
     star = unit.base.get("star", 1)
     border_col = STAR_BORDER.get(star, STAR_BORDER[1])
     if unit.is_summon:
@@ -5781,6 +6288,8 @@ def draw_battle_unit(screen, unit, font_sm, is_ally):
     pygame.draw.rect(screen, (0, 0, 0), shadow, border_radius=8)
     pygame.draw.rect(screen, body_col, rect, border_radius=8)
     pygame.draw.rect(screen, border_col, rect, width=3, border_radius=8)
+    if is_chief:
+        draw_axe_icon(screen, rect.right - 8, rect.y + 8, 14)
     if unit.shield > 0:
         try:
             pygame.draw.rect(screen, SHIELD_COLOR, rect, width=2, border_radius=8)
@@ -6019,6 +6528,77 @@ def draw_damage_report(screen, gs, font_lg, font_md, font_sm, W, H):
               W // 2, py + panel_h - 16, font_md, GOLD_COLOR, True)
 
 
+def draw_battle_bench_panel(screen, gs, font_lg, font_md, font_sm, W, H, mouse_pos):
+    """战斗内备战席面板：备战席 / 物品栏 / 出售区。
+    返回 (bench_rects, item_rects, sell_rect)。"""
+    bar_h = 150
+    bar_y = H - bar_h
+    panel_w = int(W * 0.27)
+    panel_x = 10
+    panel_y = int(H * 0.105)
+    panel_h = bar_y - panel_y - 12
+    try:
+        s = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+        s.fill((14, 16, 24, 238))
+        screen.blit(s, (panel_x, panel_y))
+        pygame.draw.rect(screen, (78, 88, 120),
+                         (panel_x, panel_y, panel_w, panel_h),
+                         width=2, border_radius=12)
+    except Exception:
+        pass
+    draw_text(screen, "战斗备战席", panel_x + 12, panel_y + 6,
+              font_md, GOLD_COLOR)
+    bench_rects = []
+    cell = max(40, min(54, (panel_h - 170) // 4))
+    gap = 6
+    start_y = panel_y + 38
+    for i in range(8):
+        col = i % 2
+        row = i // 2
+        bx = panel_x + 12 + col * (cell + gap)
+        by = start_y + row * (cell + gap + 8)
+        r = pygame.Rect(bx, by, cell, cell)
+        hover = r.collidepoint(mouse_pos)
+        pygame.draw.rect(screen, (46, 50, 66) if hover else (30, 33, 44),
+                         r, border_radius=8)
+        pygame.draw.rect(screen, (70, 78, 100), r, width=1, border_radius=8)
+        u = gs.me["bench"][i]
+        if u is not None:
+            draw_unit_cell(screen, r, u, font_sm, font_md)
+        bench_rects.append((r, i))
+    item_y = start_y + 4 * (cell + gap + 8) + 8
+    draw_text(screen, "物品栏(拖到备战席/棋盘使用)", panel_x + 12, item_y - 16,
+              font_sm, TEXT_DIM)
+    item_rects = []
+    isz = 38
+    igap = 5
+    for i in range(MAX_ITEM_BENCH):
+        col = i % 5
+        row = i // 5
+        ix = panel_x + 12 + col * (isz + igap)
+        iy = item_y + row * (isz + igap)
+        r = pygame.Rect(ix, iy, isz, isz)
+        hover = r.collidepoint(mouse_pos)
+        pygame.draw.rect(screen, (40, 44, 58) if hover else (24, 26, 36),
+                         r, border_radius=6)
+        pygame.draw.rect(screen, (60, 68, 88), r, width=1, border_radius=6)
+        if i < len(gs.me["items"]):
+            if i == gs.dragging_item_idx:
+                pygame.draw.rect(screen, HIGHLIGHT, r, width=2, border_radius=6)
+            else:
+                draw_item_icon(screen, r, gs.me["items"][i])
+        item_rects.append(r)
+    sell_y = item_y + 2 * (isz + igap) + 12
+    sell_rect = pygame.Rect(panel_x + 12, sell_y, panel_w - 24, 38)
+    hover_sell = sell_rect.collidepoint(mouse_pos)
+    pygame.draw.rect(screen, (82, 36, 36) if hover_sell else (56, 26, 26),
+                     sell_rect, border_radius=8)
+    pygame.draw.rect(screen, SELL_RED, sell_rect, width=2, border_radius=8)
+    draw_text(screen, "出售 (拖到这里)", sell_rect.centerx, sell_rect.centery,
+              font_sm, (255, 200, 200), align_center=True)
+    return bench_rects, item_rects, sell_rect
+
+
 def draw_battle_shop_bar(screen, gs, font_lg, font_md, font_sm, W, H, mouse_pos):
     if gs.viewing_player_idx != -1:
         return [], None, None, None
@@ -6138,6 +6718,16 @@ def draw_battle_shop_bar(screen, gs, font_lg, font_md, font_sm, W, H, mouse_pos)
 
 def draw_battle(screen, gs, font_lg, font_md, font_sm, font_dmg, W, H):
     battle = gs.current_battle()
+    # 己方战斗单位命中区（供战斗内点击详情/拖拽装备使用）
+    gs._battle_ally_hit_rects = []
+    if battle is not None:
+        for u in battle.allies:
+            if u.alive and getattr(u, "source_unit", None) is not None \
+                    and getattr(u, "owner_player", None) is gs.me:
+                sz = u.size
+                gs._battle_ally_hit_rects.append(
+                    (pygame.Rect(int(u.x - sz // 2), int(u.y - sz // 2),
+                                 sz, sz), u))
     if battle is None:
         return []
     mid_y = H * 0.50
@@ -6150,7 +6740,10 @@ def draw_battle(screen, gs, font_lg, font_md, font_sm, font_dmg, W, H):
         col = RED if t_left <= 5 else ORANGE_TIMER if t_left <= 10 else TEXT_WHITE
         big_font = get_font(40)
         draw_text(screen, f"{t_left:.1f}", W // 2, H * 0.02, big_font, col, True)
-        draw_text(screen, "战斗倒计时", W // 2, H * 0.055, font_sm, TEXT_DIM, True)
+        if getattr(gs, "_overtime_active", False):
+            draw_text(screen, "⚔ 加时赛 · 双方残血强化", W // 2, H * 0.055, font_sm, (255, 120, 120), True)
+        else:
+            draw_text(screen, "战斗倒计时", W // 2, H * 0.055, font_sm, TEXT_DIM, True)
     else:
         draw_text(screen, "战斗结束", W // 2, H * 0.03, font_lg, GOLD_COLOR, True)
     if battle.is_monster_battle:
@@ -6299,8 +6892,8 @@ def draw_side_traits(screen, view_p, x, y, panel_w, panel_h, font_sm, font_md):
     tc = count_traits(view_p)
     if not tc:
         draw_panel(screen, pygame.Rect(x, y, panel_w, 44),
-                   (24, 26, 34), (60, 66, 80), 5, 1)
-        draw_text(screen, "羁绊", x + 8, y + 3, font_sm, GOLD_COLOR)
+                   (24, 26, 34), (65, 72, 88), 8, 1)
+        draw_text(screen, "羁绊", x + 8, y + 4, font_sm, GOLD_COLOR)
         draw_text(screen, "(无)", x + 8, y + 24, font_sm, TEXT_DIM)
         return
     active_traits = []
@@ -6311,8 +6904,8 @@ def draw_side_traits(screen, view_p, x, y, panel_w, panel_h, font_sm, font_md):
     priority = {"BearRidge": 0, "RuneLand": 1, "Treasure": 2}
     active_traits.sort(key=lambda t: (priority.get(t[0], 9), -t[2], -t[1]))
     draw_panel(screen, pygame.Rect(x, y, panel_w, panel_h),
-               (20, 22, 30), (60, 66, 80), 5, 1)
-    draw_text(screen, "羁绊", x + 8, y + 3, font_sm, GOLD_COLOR)
+               (20, 22, 30), (65, 72, 88), 8, 1)
+    draw_text(screen, "羁绊", x + 8, y + 4, font_sm, GOLD_COLOR)
     ly = y + 24
     for trait, count, tier in active_traits[:8]:
         short = trait_short_cn(trait)
@@ -6629,53 +7222,53 @@ def draw_top_hud(screen, gs, view_p, view_name, font_lg, font_md, font_sm, W, H)
     top_h = H * 0.088
     try:
         bar = pygame.Surface((W, top_h), pygame.SRCALPHA)
-        bar.fill((10, 12, 18, 230))
+        bar.fill((12, 14, 22, 235))
         screen.blit(bar, (0, 0))
-        pygame.draw.line(screen, BORDER_LIGHT, (0, top_h - 2), (W, top_h - 2), 2)
+        pygame.draw.line(screen, (90, 75, 30), (0, top_h - 2), (W, top_h - 2), 2)
     except Exception:
         pass
     lv_box_w = W * 0.20
     lv_box = pygame.Rect(8, 8, lv_box_w, top_h - 16)
-    draw_panel(screen, lv_box, PANEL_DARK, BORDER_LIGHT, 8, 2)
-    draw_text(screen, f"等级 {view_p['level']}", lv_box.x + 10, lv_box.y + 6,
+    draw_panel(screen, lv_box, (28, 30, 42), (90, 110, 150), 10, 2)
+    draw_text(screen, f"Lv.{view_p['level']}", lv_box.x + 12, lv_box.y + 6,
               font_md, BLUE_MANA)
     if view_p["level"] < MAX_LEVEL:
         xp = view_p.get("xp", 0)
         need = view_p.get("xp_next", 999)
         ratio = min(1.0, xp / max(1, need))
-        bar_r = pygame.Rect(lv_box.x + 10, lv_box.y + lv_box.h - 14,
-                            lv_box.w - 20, 8)
-        pygame.draw.rect(screen, (30, 32, 42), bar_r, border_radius=3)
+        bar_r = pygame.Rect(lv_box.x + 12, lv_box.y + lv_box.h - 14,
+                            lv_box.w - 24, 8)
+        pygame.draw.rect(screen, (25, 27, 36), bar_r, border_radius=3)
         if ratio > 0:
             pygame.draw.rect(screen, BLUE_MANA,
                              (bar_r.x, bar_r.y, int(bar_r.w * ratio), bar_r.h),
                              border_radius=3)
-        pygame.draw.rect(screen, BORDER_LIGHT, bar_r, width=1, border_radius=3)
+        pygame.draw.rect(screen, (60, 70, 90), bar_r, width=1, border_radius=3)
         draw_text(screen, f"{xp}/{need}", bar_r.centerx, bar_r.centery,
                   font_sm, TEXT_WHITE, True)
     else:
-        bar_r = pygame.Rect(lv_box.x + 10, lv_box.y + lv_box.h - 14,
-                            lv_box.w - 20, 8)
+        bar_r = pygame.Rect(lv_box.x + 12, lv_box.y + lv_box.h - 14,
+                            lv_box.w - 24, 8)
         pygame.draw.rect(screen, GOLD_COLOR, bar_r, border_radius=3)
-        draw_text(screen, "满级", bar_r.centerx, bar_r.centery,
-                  font_sm, (0, 0, 0), True)
+        draw_text(screen, "MAX", bar_r.centerx, bar_r.centery,
+                  font_sm, (20, 15, 0), True)
     cx = W // 2
     stage, rnd = gs.stage
     rt = get_round_type(stage, rnd)
     rt_label = {"augment": "强化", "monster": "野怪",
                 "carousel": "选秀", "pvp": "PVP"}.get(rt, "")
-    stage_label = f"回合 {stage}-{rnd} ({rt_label})"
+    stage_label = f"{stage}-{rnd} · {rt_label}"
     if gs.is_multiplayer:
         stage_label = f"联机对战 · 第 {gs.round_counter + 1} 局"
-    draw_text(screen, stage_label, cx, top_h * 0.22, font_md, TEXT_WHITE, True)
+    draw_text(screen, stage_label, cx, top_h * 0.20, font_md, TEXT_WHITE, True)
     d = gs.difficulty
     d_col = DIFFICULTY_COLOR.get(d, TEXT_DIM)
     if gs.is_multiplayer:
-        draw_text(screen, f"对手: {gs.peer_name}", cx, top_h * 0.52,
+        draw_text(screen, f"对手: {gs.peer_name}", cx, top_h * 0.50,
                   font_sm, RUNE_COLOR, True)
     else:
-        draw_text(screen, f"AI难度: {DIFFICULTY_NAME.get(d, '?')}",
-                  cx, top_h * 0.52, font_sm, d_col, True)
+        draw_text(screen, f"难度: {DIFFICULTY_NAME.get(d, '?')}",
+                  cx, top_h * 0.50, font_sm, d_col, True)
     prep_t = gs.phase_timer
     if prep_t >= 900:
         draw_text(screen, "选择中...", cx, top_h * 0.82, font_lg, GOLD_COLOR, True)
@@ -6686,7 +7279,7 @@ def draw_top_hud(screen, gs, view_p, view_name, font_lg, font_md, font_sm, W, H)
             prep_col = ORANGE_TIMER
         else:
             prep_col = GOLD_COLOR
-        draw_text(screen, f"备战 {math.ceil(prep_t)}s", cx, top_h * 0.82,
+        draw_text(screen, f"{math.ceil(prep_t)}s", cx, top_h * 0.82,
                   font_md, prep_col, True)
     gold_box_w = W * 0.22
     speed_box_w = W * 0.10
@@ -6699,21 +7292,33 @@ def draw_top_hud(screen, gs, view_p, view_name, font_lg, font_md, font_sm, W, H)
         speed_col = ORANGE_TIMER
     else:
         speed_col = GREEN_HP
-    draw_panel(screen, speed_box, PANEL_DARK, speed_col, 8, 2)
+    draw_panel(screen, speed_box, (28, 30, 42), speed_col, 10, 2)
     draw_text(screen, f"{int(gs_speed)}x", speed_box.centerx,
               speed_box.centery, font_md, speed_col, True)
     gold_box = pygame.Rect(W - gold_box_w - 8, 8, gold_box_w, top_h - 16)
-    draw_panel(screen, gold_box, (45, 35, 10), GOLD_DEEP, 8, 2)
-    icon_r = int(gold_box.h * 0.28)
+    draw_panel(screen, gold_box, (50, 38, 12), (200, 160, 55), 10, 2)
+    icon_r = int(gold_box.h * 0.26)
     ix = gold_box.x + 14 + icon_r
-    iy = gold_box.y + gold_box.h // 2 - 3
+    iy = gold_box.y + gold_box.h // 2
     draw_coin_icon(screen, ix, iy, icon_r)
     draw_text(screen, str(view_p["gold"]),
-              ix + icon_r + 8, iy - 8, font_md, GOLD_COLOR)
+              ix + icon_r + 10, iy - 10, font_md, GOLD_COLOR)
     interest = min(5, view_p["gold"] // 10)
-    draw_text(screen, f"利息 +{interest}",
-              ix + icon_r + 8, iy + 8, font_sm, TEXT_DIM)
-    draw_text(screen, f"当前视角: {view_name}", cx, top_h + 6,
+    int_label = f"利息+{interest}" + ("(满)" if view_p["gold"] // 10 >= 5 else "")
+    draw_text(screen, int_label,
+              ix + icon_r + 10, iy + 8, font_sm, (200, 180, 120))
+    # 金铲铲风格：连胜/连败标识
+    ws = view_p.get("win_streak", 0)
+    ls = view_p.get("lose_streak", 0)
+    if ws >= 2:
+        draw_text(screen, f"{ws}连胜",
+                  gold_box.right - 14 - font_sm.size(f"{ws}连胜")[0],
+                  iy - 10, font_sm, GREEN_HP)
+    elif ls >= 2:
+        draw_text(screen, f"{ls}连败",
+                  gold_box.right - 14 - font_sm.size(f"{ls}连败")[0],
+                  iy - 10, font_sm, (255, 110, 110))
+    draw_text(screen, f"视角: {view_name}", cx, top_h + 5,
               font_sm, TEXT_DIM, True)
     return lv_box
 
@@ -6916,6 +7521,13 @@ def draw_bottom_info_panel(screen, gs, view_p, font_lg, font_md, font_sm,
                 active_cnt += 1
         draw_text(screen, f"激活羁绊: {active_cnt} / {len(tc)}",
                   mid_x + 12, ry, font_sm, GREEN_HP)
+    # 财宝猎人：显示当前收菜层数与藏宝碎片进度
+    _tr_thr = TRAIT_DATA.get("Treasure", [])
+    if _tr_thr and tc.get("Treasure", 0) >= _tr_thr[0]:
+        ry += 20
+        draw_text(screen,
+                  f"寻宝: 第{getattr(gs, 'bounty_layer_current', 1)}层 · 藏宝碎片{getattr(gs, 'bounty_shards', 0)}/10",
+                  mid_x + 12, ry, font_sm, (255, 210, 90))
     ws = view_p.get("win_streak", 0)
     ls = view_p.get("lose_streak", 0)
     if ws >= 2 or ls >= 2:
@@ -6976,9 +7588,10 @@ def draw_unit_detail_panel(screen, gs, unit, view_p, font_lg, font_md, font_sm, 
     traits = unit.get("traits", [])
     _role = unit.get("role", "warrior")
     _all_t = list(traits) + [ROLE_TO_CLASS_TRAIT.get(_role, "")]
-    trait_str = " / ".join(trait_cn(t) for t in _all_t if t)
+    trait_str = "  ".join(trait_cn(t) for t in _all_t if t)
+    # 羁绊行：放在名字/职业下方，金铲铲式清晰展示
     draw_text(screen, f"羁绊: {trait_str}",
-              dx + d_w - 12, dy + 16, font_sm, TEXT_WHITE)
+              dx + 80, dy + 62, font_sm, GOLD_COLOR)
     y = dy + title_h + 10
     item_stats = get_unit_item_stats(unit)
     base_hp = unit.get("hp", 0)
@@ -7055,12 +7668,14 @@ def draw_unit_detail_panel(screen, gs, unit, view_p, font_lg, font_md, font_sm, 
     draw_panel(screen, eq_box, (30, 34, 44), (60, 68, 88), 8, 1)
     draw_text(screen, "已装备", eq_box.x + 10, eq_box.y + 6, font_sm, GOLD_COLOR)
     items = unit.get("items", [])
+    gs._detail_equip_hits = []
     if items:
         for i, item in enumerate(items):
             ir = pygame.Rect(eq_box.x + 60 + i * 70, eq_box.y + 24, 48, 48)
             draw_item_icon(screen, ir, item)
             draw_text(screen, item.get("name", "?")[:6],
                       ir.centerx, ir.bottom + 4, font_sm, TEXT_WHITE, True)
+            gs._detail_equip_hits.append((ir, item))
     else:
         draw_text(screen, "(无)", eq_box.x + 60, eq_box.centery, font_sm, TEXT_DIM)
     y = eq_box.bottom + 8
@@ -7087,8 +7702,11 @@ def draw_unit_detail_panel(screen, gs, unit, view_p, font_lg, font_md, font_sm, 
         draw_text(screen, rec_item["name"][:6],
                   ir.centerx, ir.bottom + 4, font_sm, TEXT_WHITE, True)
     refund = cost * (3 ** (star - 1))
-    draw_text(screen, f"出售: {refund} 金", dx + 16, dy + d_h - 22,
-              font_sm, GOLD_COLOR)
+    sell_btn = pygame.Rect(dx + 16, dy + d_h - 42, 130, 32)
+    draw_button(screen, sell_btn, (110, 28, 28), SELL_RED, 8)
+    draw_text(screen, f"出售 +{refund}金", sell_btn.centerx,
+              sell_btn.centery, font_md, (255, 210, 210), True)
+    gs._detail_sell_rect = sell_btn
     draw_text(screen, "点击空白关闭", dx + d_w - 130, dy + d_h - 22,
               font_sm, TEXT_DIM)
 
@@ -7295,6 +7913,16 @@ def draw_item_choice_popup(screen, gs, font_lg, font_md, font_sm, W, H, mouse_po
             draw_text(screen, "点击选择", r.centerx, r.bottom - 32,
                       font_sm, GOLD_COLOR, True)
     gs._item_choice_rects = rects
+    gs._tome_close_rect = None
+    if tome:
+        # 纹章之书：可直接关闭放弃选择（伪棋子保留在备战席，下次可再次触发）
+        close_r = pygame.Rect(W // 2 - 75, int(H * 0.70), 150, 42)
+        hover_c = close_r.collidepoint(mouse_pos)
+        draw_button(screen, close_r, (80, 40, 40) if hover_c else (60, 30, 30),
+                    SELL_RED, 10)
+        draw_text(screen, "放弃选择", close_r.centerx, close_r.centery,
+                  font_md, (255, 210, 210), True)
+        gs._tome_close_rect = close_r
     return rects
 
 
@@ -7406,19 +8034,38 @@ def draw_game(screen, gs, font_lg, font_md, font_sm, font_dmg, W, H, mouse_pos):
     if gs.is_battle_phase:
         battle_selector_rects = draw_battle(screen, gs, font_lg, font_md,
                                             font_sm, font_dmg, W, H)
+        # 战斗备战席面板开关按钮
+        tgl = pygame.Rect(10, 8, W * 0.14, H * 0.055)
+        tgl_col = (34, 96, 44) if gs.show_battle_bench else (42, 50, 66)
+        tgl_border = GREEN_HP if gs.show_battle_bench else BORDER_LIGHT
+        draw_button(screen, tgl, tgl_col, tgl_border, 8)
+        draw_text(screen, f"备战席 {'开' if gs.show_battle_bench else '关'}",
+                  tgl.centerx, tgl.centery, font_sm, TEXT_WHITE, True)
+        gs._battle_bench_toggle_rect = tgl
+        bbench, bitem, bsell = [], [], None
+        if gs.show_battle_bench:
+            bbench, bitem, bsell = draw_battle_bench_panel(
+                screen, gs, font_lg, font_md, font_sm, W, H, mouse_pos)
+        gs._battle_sell_rect = bsell
         if not gs.battle_phase_resolved:
             bshop, brefresh, blevelup, block = draw_battle_shop_bar(
                 screen, gs, font_lg, font_md, font_sm, W, H, mouse_pos)
         else:
             bshop, brefresh, blevelup, block = [], None, None, None
+        # 战斗内棋子详情弹窗（含出售按钮）
+        if gs.detail_unit is not None:
+            u = safe_unit(gs.detail_unit)
+            if u is not None:
+                draw_unit_detail_panel(screen, gs, u, gs.me,
+                                       font_lg, font_md, font_sm, W, H)
         draw_toast(screen, gs, font_md, W, H)
         draw_text(screen, f"调试: {DBG_LAST}", W // 2, H - 10, font_sm,
                   (255, 80, 80), align_center=True)
-        return (board_rect_list, bench_rect_list, bshop,
+        return ([], bbench, bshop,
                 brefresh, blevelup, gold_btn_rect,
                 trait_btn_rect, auto_btn_rect, prev_btn_rect, next_btn_rect,
-                None, hex_card_rects, battle_selector_rects, block,
-                [], [], [], [], None, -1, None, None, None)
+                bsell, hex_card_rects, battle_selector_rects, block,
+                [], bitem, [], [], None, -1, None, None, None)
 
     if gs.viewing_player_idx == -1:
         view_p, view_name = gs.me, "你"
@@ -7449,11 +8096,11 @@ def draw_game(screen, gs, font_lg, font_md, font_sm, font_dmg, W, H, mouse_pos):
     board_y = content_y + 6
 
     board_bg = pygame.Rect(board_x - 8, board_y - 8, board_w + 16, board_h + 16)
-    draw_panel(screen, board_bg, (22, 25, 34), (60, 68, 90), 10, 2)
-    draw_text(screen, "前", board_x - 22, board_y + cell_size * 0.5 + gap * 0.5,
-              font_sm, (255, 140, 120))
-    draw_text(screen, "后", board_x - 22, board_y + cell_size * 3.5 + gap * 1.5,
-              font_sm, (140, 180, 255))
+    draw_panel(screen, board_bg, (20, 23, 32), (70, 78, 98), 12, 2)
+    draw_text(screen, "前", board_x - 24, board_y + cell_size * 0.5 + gap * 0.5,
+              font_sm, (255, 150, 130))
+    draw_text(screen, "后", board_x - 24, board_y + cell_size * 3.5 + gap * 1.5,
+              font_sm, (140, 185, 255))
 
     hover_board = hover_bench = None
     if gs.dragging:
@@ -7479,14 +8126,14 @@ def draw_game(screen, gs, font_lg, font_md, font_sm, font_dmg, W, H, mouse_pos):
             row_is_front = row_idx <= 1
             base = FRONT_ROW_COLOR if row_is_front else BACK_ROW_COLOR
             if (row_idx + col_idx) % 2 == 0:
-                base = (min(255, base[0] + 6), min(255, base[1] + 6),
-                        min(255, base[2] + 6))
+                base = (min(255, base[0] + 8), min(255, base[1] + 8),
+                        min(255, base[2] + 8))
             bc = base
             if hover_board == (row_idx, col_idx):
-                bc = (min(255, base[0] + 40), min(255, base[1] + 40),
-                      min(255, base[2] + 40))
-            pygame.draw.rect(screen, bc, r, border_radius=6)
-            pygame.draw.rect(screen, (70, 78, 96), r, width=1, border_radius=6)
+                bc = (min(255, base[0] + 50), min(255, base[1] + 50),
+                      min(255, base[2] + 50))
+            pygame.draw.rect(screen, bc, r, border_radius=8)
+            pygame.draw.rect(screen, (80, 88, 108), r, width=1, border_radius=8)
             if hover_board == (row_idx, col_idx):
                 is_target_empty = (view_p["board"][row_idx][col_idx] is None)
                 is_from_bench = (gs.drag_source_type == "bench")
@@ -7534,16 +8181,16 @@ def draw_game(screen, gs, font_lg, font_md, font_sm, font_dmg, W, H, mouse_pos):
     bench_y = board_y + board_h + 38
     bench_cell = cell_size * 0.88
     board_cnt = count_board_units(view_p)
-    draw_text(screen, f"备战席  ({board_cnt}/{get_population_cap(view_p)} 上场)",
+    draw_text(screen, f"备战席  {board_cnt}/{get_population_cap(view_p)}上场",
               board_x, bench_y - 18, font_sm, TEXT_DIM)
     for i in range(8):
         bx = board_x + i * (bench_cell + gap)
         r = pygame.Rect(bx, bench_y, bench_cell, bench_cell)
-        bc = (32, 35, 45)
+        bc = (28, 31, 42)
         if hover_bench == i:
-            bc = (55, 60, 75)
-        pygame.draw.rect(screen, bc, r, border_radius=5)
-        pygame.draw.rect(screen, (70, 78, 96), r, width=1, border_radius=5)
+            bc = (50, 55, 72)
+        pygame.draw.rect(screen, bc, r, border_radius=7)
+        pygame.draw.rect(screen, (65, 72, 90), r, width=1, border_radius=7)
         if hover_bench == i:
             pygame.draw.rect(screen, HIGHLIGHT, r, width=2, border_radius=5)
         bench_rect_list.append((r, i))
@@ -7582,46 +8229,44 @@ def draw_game(screen, gs, font_lg, font_md, font_sm, font_dmg, W, H, mouse_pos):
         r = pygame.Rect(sx, shop_y, shop_w, shop_h)
         champ = gs.shop[i]
         cost = champ["cost"] if champ else 1
-        bg_col = COST_BG.get(cost, (35, 38, 48))
-        draw_panel(screen, r, bg_col, BORDER_LIGHT, 8, 2)
+        bg_col = COST_BG.get(cost, (30, 33, 44))
+        draw_panel(screen, r, bg_col, COST_COLORS.get(cost, BORDER_LIGHT), 10, 2)
         if champ:
+            # 顶部费用色条
             pygame.draw.rect(screen, COST_COLORS.get(cost, TEXT_WHITE),
-                             (r.x, r.y, r.w, 4), border_radius=2)
+                             (r.x + 2, r.y + 2, r.w - 4, 3), border_radius=2)
         shop_rect_list.append((r, i))
         if champ:
             safe_unit(champ)
             traits = champ.get("traits", [])
-            if "BearRidge" in traits:
-                pygame.draw.rect(screen, BEAR_COLOR, r, width=2, border_radius=8)
-            elif "RuneLand" in traits:
-                pygame.draw.rect(screen, RUNE_COLOR, r, width=2, border_radius=8)
-            elif "Treasure" in traits:
-                pygame.draw.rect(screen, TREASURE_COLOR, r, width=2, border_radius=8)
             role = champ.get("role", "warrior")
             role_col = ROLE_COLORS.get(role, TEXT_DIM)
-            role_rect = pygame.Rect(r.x + 3, r.y + 8, 20, 18)
-            pygame.draw.rect(screen, (15, 15, 20), role_rect, border_radius=3)
-            pygame.draw.rect(screen, role_col, role_rect, width=1, border_radius=3)
+            role_rect = pygame.Rect(r.x + 5, r.y + 10, 22, 18)
+            pygame.draw.rect(screen, (12, 12, 18), role_rect, border_radius=4)
+            pygame.draw.rect(screen, role_col, role_rect, width=1, border_radius=4)
             draw_text(screen, ROLE_SHORT.get(role, "?"),
                       role_rect.centerx, role_rect.centery, font_sm, role_col, True)
             draw_text(screen, champ_cn(champ["name"])[:5], r.centerx,
-                      r.y + shop_h * 0.30, font_md,
+                      r.y + shop_h * 0.32, font_md,
                       COST_COLORS.get(cost, TEXT_WHITE), True)
             _role = champ.get("role", "warrior")
             _all_t = list(traits) + [ROLE_TO_CLASS_TRAIT.get(_role, "")]
             _all_t = [t for t in _all_t if t][:3]
             tstr = "·".join(trait_short_cn(t) for t in _all_t)
-            draw_text(screen, tstr, r.centerx, r.y + shop_h * 0.58,
+            draw_text(screen, tstr, r.centerx, r.y + shop_h * 0.60,
                       font_sm, TEXT_DIM, True)
-            draw_text(screen, f"{cost}金", r.centerx,
-                      r.y + shop_h * 0.85, font_md, GOLD_COLOR, True)
+            # 金币图标+费用
+            coin_y = r.y + shop_h * 0.86
+            draw_coin_icon(screen, r.centerx - 14, coin_y, 7)
+            draw_text(screen, f"{cost}", r.centerx + 4, coin_y - 7,
+                      font_md, GOLD_COLOR)
             owned1 = count_unit_owned(gs.me, champ["name"], 1)
             owned2 = count_unit_owned(gs.me, champ["name"], 2)
             owned3 = count_unit_owned(gs.me, champ["name"], 3)
             if owned1 + owned2 + owned3 > 0:
-                br = pygame.Rect(r.right - 50, r.y + 8, 46, 16)
-                pygame.draw.rect(screen, (40, 60, 40), br, border_radius=3)
-                pygame.draw.rect(screen, GREEN_HP, br, width=1, border_radius=3)
+                br = pygame.Rect(r.right - 52, r.y + 10, 48, 16)
+                pygame.draw.rect(screen, (35, 55, 35), br, border_radius=4)
+                pygame.draw.rect(screen, GREEN_HP, br, width=1, border_radius=4)
                 if owned3:
                     txt = f"{owned3}×3★"
                 elif owned2:
@@ -7636,31 +8281,31 @@ def draw_game(screen, gs, font_lg, font_md, font_sm, font_dmg, W, H, mouse_pos):
     if gs.viewing_player_idx == -1:
         levelup_rect = pygame.Rect(10, btn_y, W * 0.28, btn_h)
         if gs.me["level"] >= MAX_LEVEL:
-            draw_button(screen, levelup_rect, (55, 55, 60), (100, 100, 100), 8)
+            draw_button(screen, levelup_rect, (50, 50, 55), (90, 90, 90), 10)
             draw_text(screen, "已满级", levelup_rect.centerx,
                       levelup_rect.centery, font_md, TEXT_DIM, True)
         else:
-            draw_button(screen, levelup_rect, BLUE_DEEP, BLUE, 8)
+            draw_button(screen, levelup_rect, (30, 60, 120), BLUE, 10)
             xp = gs.me.get("xp", 0)
             need = gs.me.get("xp_next", 999)
             remain = max(0, need - xp)
-            draw_text(screen, f"升级 {BUY_XP_COST}金 (还差{remain})",
+            draw_text(screen, f"升级 {BUY_XP_COST}金 (差{remain})",
                       levelup_rect.centerx, levelup_rect.centery,
                       font_md, TEXT_WHITE, True)
     refresh_rect = pygame.Rect(W * 0.36, btn_y, W * 0.28, btn_h)
     if gs.viewing_player_idx == -1:
-        draw_button(screen, refresh_rect, BLUE_DEEP, BLUE, 8)
+        draw_button(screen, refresh_rect, (30, 60, 120), BLUE, 10)
         draw_text(screen, f"刷新 {REFRESH_COST}金", refresh_rect.centerx,
                   refresh_rect.centery, font_md, TEXT_WHITE, True)
     else:
-        draw_button(screen, refresh_rect, (40, 40, 45), (90, 90, 90), 8)
+        draw_button(screen, refresh_rect, (38, 38, 44), (85, 85, 90), 10)
         draw_text(screen, "观战中", refresh_rect.centerx,
                   refresh_rect.centery, font_md, TEXT_DIM, True)
     gold_btn_rect = pygame.Rect(W - 10 - W * 0.30, btn_y, W * 0.30, btn_h)
-    draw_button(screen, gold_btn_rect, (55, 42, 15), GOLD_DEEP, 8)
-    draw_coin_icon(screen, gold_btn_rect.x + 18, gold_btn_rect.centery, 9)
+    draw_button(screen, gold_btn_rect, (60, 45, 15), GOLD_DEEP, 10)
+    draw_coin_icon(screen, gold_btn_rect.x + 16, gold_btn_rect.centery, 9)
     draw_text(screen, f"{gs.me['gold']}",
-              gold_btn_rect.x + 34, gold_btn_rect.centery, font_md, GOLD_COLOR)
+              gold_btn_rect.x + 32, gold_btn_rect.centery, font_md, GOLD_COLOR)
 
     trait_btn_rect, prev_btn_rect, next_btn_rect, auto_btn_rect = \
         trait_rect, prev_rect, next_rect, auto_rect
@@ -7732,12 +8377,20 @@ def draw_game(screen, gs, font_lg, font_md, font_sm, font_dmg, W, H, mouse_pos):
         draw_shop_odds_popup(screen, gs, font_md, font_sm, W, H)
 
     if gs.show_trait_popup:
+        # 羁绊弹窗：设置最大宽高，标题固定在头部，内容区域垂直滚动，棋子两栏渲染
         tw, th = int(W * 0.55), int(H * 0.82)
+        tw = min(tw, 680)
+        th = min(th, 780)
         tx, ty = W // 2 - tw // 2, H // 2 - th // 2
         draw_panel(screen, pygame.Rect(tx, ty, tw, th),
-                   (28, 32, 42), (100, 70, 140), 12, 2)
-        draw_text(screen, "当前羁绊 (含棋子列表)", tx + 20, ty + 14,
+                   (28, 32, 42), (100, 70, 140), 14, 2)
+        header_h = 46
+        draw_text(screen, "当前羁绊 (含棋子列表)", tx + 20, ty + 12,
                   font_md, GOLD_COLOR)
+        draw_text(screen, "滚轮滚动 · 点击关闭", tx + tw - 170, ty + 14,
+                  font_sm, TEXT_DIM)
+        pygame.draw.line(screen, (90, 78, 130), (tx, ty + header_h),
+                         (tx + tw, ty + header_h), 2)
         board_names = set()
         for _row in view_p["board"]:
             for _u in _row:
@@ -7746,8 +8399,14 @@ def draw_game(screen, gs, font_lg, font_md, font_sm, font_dmg, W, H, mouse_pos):
                     if _n:
                         board_names.add(_n)
         trait_count = count_traits(view_p)
-        line_y = ty + 50
         sorted_traits = sorted(trait_count.items(), key=lambda x: -x[1])
+        # 预构建内容行：(y偏移, 行高, 绘制函数)
+        pad_x = tx + 16
+        col_gap = 18
+        content_rows = []
+        cur_y = 8
+        _role_class = {"ClassTank": "tank", "ClassArcher": "archer",
+                       "ClassMage": "mage", "ClassWarrior": "warrior"}
         for trait_name, cnt in sorted_traits:
             thresholds = TRAIT_DATA.get(trait_name, [])
             tier = sum(1 for t in thresholds if cnt >= t)
@@ -7757,8 +8416,10 @@ def draw_game(screen, gs, font_lg, font_md, font_sm, font_dmg, W, H, mouse_pos):
                 col = TRAIT_COLOR[trait_name] if tier > 0 else TEXT_DIM
             else:
                 col = GOLD_COLOR if tier > 0 else TEXT_WHITE
-            draw_text(screen, title, tx + 20, line_y, font_sm, col)
-            line_y += 20
+            content_rows.append(
+                (cur_y, 20, lambda yy, s=title, c=col:
+                 draw_text(screen, s, pad_x, ty + header_h + yy, font_sm, c)))
+            cur_y += 20
             if trait_name in TRAIT_DESC:
                 effect_name, effects = TRAIT_DESC[trait_name]
                 for i, eff_txt in enumerate(effects):
@@ -7766,10 +8427,11 @@ def draw_game(screen, gs, font_lg, font_md, font_sm, font_dmg, W, H, mouse_pos):
                     mark = ">" if is_active else " "
                     col2 = GREEN_HP if is_active else (140, 140, 140)
                     line = f"  {mark} ({thresholds[i]}) {effect_name} {eff_txt}"
-                    draw_text(screen, line, tx + 20, line_y, font_sm, col2)
-                    line_y += 18
-            _role_class = {"ClassTank": "tank", "ClassArcher": "archer",
-                           "ClassMage": "mage", "ClassWarrior": "warrior"}
+                    content_rows.append(
+                        (cur_y, 18, lambda yy, l=line, c=col2:
+                         draw_text(screen, l, pad_x, ty + header_h + yy,
+                                   font_sm, c)))
+                    cur_y += 18
             if trait_name in _role_class:
                 _tr = _role_class[trait_name]
                 trait_champs = [c for c in CHAMPION_LIST
@@ -7783,59 +8445,99 @@ def draw_game(screen, gs, font_lg, font_md, font_sm, font_dmg, W, H, mouse_pos):
                 trait_champs = []
             if trait_champs:
                 trait_champs = sorted(trait_champs, key=lambda c: c["cost"])
-                max_x = tx + tw - 30
-                cur_x = tx + 20
-                cur_y = line_y
-                draw_text(screen, "  棋子: ", cur_x, cur_y, font_sm,
-                          (170, 200, 255))
-                cur_x += font_sm.size("  棋子: ")[0]
-                first_in_line = True
-                for c in trait_champs:
-                    on_board = c["name"] in board_names
-                    nm_col = GREEN_HP if on_board else (170, 200, 255)
-                    nm = f"{champ_cn(c['name'])}{c['cost']}费"
-                    sep = "" if first_in_line else "、"
-                    sep_w = font_sm.size(sep)[0] if sep else 0
-                    nm_w = font_sm.size(nm)[0]
-                    if cur_x + sep_w + nm_w > max_x:
-                        cur_x = tx + 20
-                        cur_y += 16
-                        sep = ""
-                        sep_w = 0
-                        first_in_line = True
-                    if sep:
-                        draw_text(screen, sep, cur_x, cur_y, font_sm,
-                                  (170, 200, 255))
-                        cur_x += sep_w
-                    draw_text(screen, nm, cur_x, cur_y, font_sm, nm_col)
-                    cur_x += nm_w
-                    first_in_line = False
-                line_y = cur_y + 16
-            line_y += 6
+                label_y = cur_y
+                content_rows.append(
+                    (label_y, 18, lambda yy:
+                     draw_text(screen, "  棋子:", pad_x, ty + header_h + yy,
+                               font_sm, (170, 200, 255))))
+                cur_y += 18
+                # 两栏分栏渲染
+                mid_x = pad_x + (tw - 40) // 2
+                for k in range(0, len(trait_champs), 2):
+                    pair = trait_champs[k:k + 2]
+                    def _draw_pair(yy, pair=pair):
+                        for j, c in enumerate(pair):
+                            on_board = c["name"] in board_names
+                            nm_col = GREEN_HP if on_board else (170, 200, 255)
+                            nm = f"{champ_cn(c['name'])}{c['cost']}费"
+                            draw_text(screen, nm, pad_x + j * (mid_x - pad_x),
+                                      ty + header_h + yy, font_sm, nm_col)
+                    content_rows.append((cur_y, 18, _draw_pair))
+                    cur_y += 18
+                cur_y += 4
+            cur_y += 6
         buffs = apply_trait_buffs(view_p)
         merge_hex_into_buffs(buffs, view_p)
-        line_y += 6
-        draw_text(screen, "总加成:", tx + 20, line_y, font_sm, GOLD_COLOR)
-        line_y += 22
-        draw_text(screen, f"攻击 x{buffs['atk_mult']:.2f}  法强 x{buffs['sp_mult']:.2f}",
-                  tx + 20, line_y, font_sm, TEXT_WHITE)
-        line_y += 20
-        draw_text(screen, f"生命 x{buffs['hp_mult']:.2f}  暴击 {int(buffs['crit'] * 100)}%",
-                  tx + 20, line_y, font_sm, TEXT_WHITE)
-        line_y += 20
-        draw_text(screen, f"攻速 x{buffs['atk_speed_mult']:.2f}  额外回蓝 {buffs['extra_mana_per_attack']}",
-                  tx + 20, line_y, font_sm, TEXT_WHITE)
+        cur_y += 6
+        content_rows.append(
+            (cur_y, 22, lambda yy:
+             draw_text(screen, "总加成:", pad_x, ty + header_h + yy,
+                       font_sm, GOLD_COLOR)))
+        cur_y += 22
+        content_rows.append(
+            (cur_y, 20, lambda yy:
+             draw_text(screen,
+                       f"攻击 x{buffs['atk_mult']:.2f}  法强 x{buffs['sp_mult']:.2f}",
+                       pad_x, ty + header_h + yy, font_sm, TEXT_WHITE)))
+        cur_y += 20
+        content_rows.append(
+            (cur_y, 20, lambda yy:
+             draw_text(screen,
+                       f"生命 x{buffs['hp_mult']:.2f}  暴击 {int(buffs['crit'] * 100)}%",
+                       pad_x, ty + header_h + yy, font_sm, TEXT_WHITE)))
+        cur_y += 20
+        content_rows.append(
+            (cur_y, 20, lambda yy:
+             draw_text(screen,
+                       f"攻速 x{buffs['atk_speed_mult']:.2f}  额外回蓝 {buffs['extra_mana_per_attack']}",
+                       pad_x, ty + header_h + yy, font_sm, TEXT_WHITE)))
+        cur_y += 20
         sum_star = get_bear_ridge_summon_star(view_p)
         if sum_star > 0:
-            line_y += 20
-            draw_text(screen, f"狗熊岭召唤: {sum_star}星团子",
-                      tx + 20, line_y, font_sm, (180, 230, 255))
+            content_rows.append(
+                (cur_y, 20, lambda yy:
+                 draw_text(screen, f"狗熊岭召唤: {sum_star}星团子",
+                           pad_x, ty + header_h + yy, font_sm, (180, 230, 255))))
+            cur_y += 20
         t_gold = get_treasure_gold(view_p)
         if t_gold > 0:
-            line_y += 20
-            draw_text(screen, f"财宝猎人: 每回合 +{t_gold} 金",
-                      tx + 20, line_y, font_sm, TREASURE_COLOR)
-        draw_text(screen, "点击关闭", tx + 20, ty + th - 28, font_sm, TEXT_DIM)
+            content_rows.append(
+                (cur_y, 20, lambda yy:
+                 draw_text(screen, f"财宝猎人: 每回合 +{t_gold} 金",
+                           pad_x, ty + header_h + yy, font_sm, TREASURE_COLOR)))
+            cur_y += 20
+        content_h = cur_y
+        view_h = th - header_h - 8
+        max_scroll = max(0, content_h - view_h)
+        scroll = getattr(gs, "_trait_scroll", 0)
+        scroll = max(0, min(scroll, max_scroll))
+        gs._trait_scroll = scroll
+        gs._trait_max_scroll = max_scroll
+        # 滚动条
+        if max_scroll > 0:
+            sb_x = tx + tw - 14
+            sb_track = pygame.Rect(sb_x, ty + header_h, 6, view_h)
+            pygame.draw.rect(screen, (52, 54, 72), sb_track, border_radius=3)
+            sb_h = max(12, int(view_h * view_h / content_h))
+            sb_y = ty + header_h + int((view_h - sb_h) * scroll / max_scroll)
+            pygame.draw.rect(screen, (150, 140, 190),
+                             (sb_x, sb_y, 6, sb_h), border_radius=3)
+        # 内容区裁剪绘制
+        clip_rect = pygame.Rect(tx, ty + header_h, tw, view_h)
+        old_clip = screen.get_clip()
+        try:
+            screen.set_clip(clip_rect)
+            for y_off, row_h, draw_fn in content_rows:
+                if y_off + row_h <= scroll:
+                    continue
+                if y_off > scroll + view_h:
+                    break
+                try:
+                    draw_fn(y_off - scroll)
+                except Exception:
+                    pass
+        finally:
+            screen.set_clip(old_clip)
 
     if gs.battle_result_timer > 0:
         t = gs.battle_result_timer / 2.0
@@ -7978,7 +8680,7 @@ def draw_main_menu(screen, font_title, font_lg, font_md, font_sm,
             label_col = TEXT_WHITE
         draw_text(screen, label, btn.centerx, btn.centery,
                   get_font(28), label_col, True)
-    draw_text(screen, "v1.2.9  ·  Built with Pygame  ·  支持联机对战",
+    draw_text(screen, "v1.3.0  ·  Built with Pygame  ·  支持联机对战",
               W // 2, H - 22, font_sm, (100, 105, 115), True)
     draw_text(screen, f"调试: {DBG_LAST}", W // 2, H - 8, font_sm,
               (200, 60, 60), align_center=True)
@@ -8368,6 +9070,12 @@ def run_game_session(screen, clock, difficulty, font_lg, font_md, font_sm,
                 if event.type == pygame.KEYDOWN:
                     if gs.game_over:
                         continue
+                    # ESC：关闭纹章/光明/杰作选择弹窗（放弃选择，道具/伪棋子保留）
+                    if event.key == pygame.K_ESCAPE \
+                            and getattr(gs, "show_item_choice_popup", False):
+                        gs.close_item_choice_popup()
+                        play_sfx("click")
+                        continue
                     if (getattr(gs, "show_starter_popup", False)
                             or getattr(gs, "show_global_augment_popup", False)
                             or getattr(gs, "show_bounty_popup", False)
@@ -8463,6 +9171,15 @@ def run_game_session(screen, clock, difficulty, font_lg, font_md, font_sm,
                         gs.buy_champ(idx)
                         continue
 
+                # 滚轮：羁绊弹窗垂直滚动
+                if event.type == pygame.MOUSEWHEEL and gs.show_trait_popup:
+                    step = 26
+                    gs._trait_scroll -= event.y * step
+                    gs._trait_scroll = max(
+                        0, min(gs._trait_scroll,
+                               getattr(gs, "_trait_max_scroll", 0)))
+                    continue
+
                 if gs.game_over:
                     if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                         mx, my = event.pos
@@ -8516,6 +9233,12 @@ def run_game_session(screen, clock, difficulty, font_lg, font_md, font_sm,
                 if getattr(gs, "show_item_choice_popup", False):
                     if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                         mx, my = event.pos
+                        close_r = getattr(gs, "_tome_close_rect", None)
+                        if close_r and close_r.collidepoint(mx, my):
+                            # 纹章之书：放弃选择，伪棋子保留
+                            gs.close_item_choice_popup()
+                            play_sfx("click")
+                            continue
                         for i, r in enumerate(getattr(gs, "_item_choice_rects", [])):
                             if r.collidepoint(mx, my):
                                 gs.choose_special_item_option(i)
@@ -8562,7 +9285,28 @@ def run_game_session(screen, clock, difficulty, font_lg, font_md, font_sm,
                             continue
 
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 3:
-                    if gs.is_battle_phase or gs.viewing_player_idx != -1:
+                    if gs.is_battle_phase:
+                        # 战斗内：备战席面板右键出售 / 物品栏右键对详情目标使用特殊道具
+                        mx, my = event.pos
+                        if gs.show_battle_bench:
+                            for r, bid in bench_rects:
+                                if r.collidepoint(mx, my):
+                                    gs.sell_unit_at("bench", bid)
+                                    gs.detail_unit = None
+                                    break
+                            else:
+                                for i, ir in enumerate(item_bench_rects):
+                                    if ir.collidepoint(mx, my) \
+                                            and i < len(gs.me["items"]) \
+                                            and gs.detail_unit is not None \
+                                            and getattr(gs, "detail_source_type", None) == "bench":
+                                        it = gs.me["items"][i]
+                                        if it.get("special_kind"):
+                                            gs.use_special_item(
+                                                it, gs.detail_unit, "bench")
+                                        break
+                        continue
+                    if gs.viewing_player_idx != -1:
                         continue
                     mx, my = event.pos
                     used_special = False
@@ -8586,6 +9330,8 @@ def run_game_session(screen, clock, difficulty, font_lg, font_md, font_sm,
                         if r.collidepoint(mx, my):
                             gs.sell_unit_at("board", rid, cid)
                             break
+                    if gs.detail_unit is not None:
+                        gs.detail_unit = None
                     continue
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     mx, my = event.pos
@@ -8598,6 +9344,37 @@ def run_game_session(screen, clock, difficulty, font_lg, font_md, font_sm,
                             gs.speed = 1.0 if gs.speed >= 3.0 else gs.speed + 1.0
                             play_sfx("click")
                             continue
+                        # 备战席面板开关
+                        tgl = getattr(gs, "_battle_bench_toggle_rect", None)
+                        if tgl and tgl.collidepoint(mx, my):
+                            gs.show_battle_bench = not gs.show_battle_bench
+                            gs.detail_unit = None
+                            gs.dragging = False
+                            play_sfx("click")
+                            continue
+                        # 战斗内棋子详情弹窗：出售按钮 / 关闭
+                        if gs.detail_unit is not None:
+                            sell_b = getattr(gs, "_detail_sell_rect", None)
+                            if sell_b and sell_b.collidepoint(mx, my):
+                                du = gs.detail_unit
+                                st = getattr(gs, "detail_source_type", None)
+                                di1 = gs.detail_i1
+                                di2 = gs.detail_i2
+                                if st == "board":
+                                    play_sfx("error")
+                                    gs.battle_log = "战斗阶段无法出售棋盘上正在对战的棋子！"
+                                    gs._toast_msg("战斗阶段无法出售棋盘上正在对战的棋子！")
+                                else:
+                                    gs.sell_unit_at("bench", di1)
+                                gs.detail_unit = None
+                                continue
+                            # 点击弹窗外部关闭（弹窗实际区域 W*0.82 x H*0.72 居中）
+                            popup_rect = pygame.Rect(
+                                int(W * 0.09), int(H * 0.14),
+                                int(W * 0.82), int(H * 0.72))
+                            if not popup_rect.collidepoint(mx, my):
+                                gs.detail_unit = None
+                                continue
                         if gs.battle_phase_resolved:
                             gs.post_battle_timer = 0
                             continue
@@ -8624,6 +9401,44 @@ def run_game_session(screen, clock, difficulty, font_lg, font_md, font_sm,
                                 break
                         if bought:
                             continue
+                        # 战斗备战席面板：点击备战席/物品栏/出售区
+                        panel_clicked = False
+                        if gs.show_battle_bench:
+                            for r, bid in bench_rects:
+                                if r.collidepoint(mx, my):
+                                    panel_clicked = True
+                                    u = gs.me["bench"][bid]
+                                    if u is not None and not u.get("is_pseudo_bench_only"):
+                                        gs.detail_unit = u
+                                        gs.detail_source_type = "bench"
+                                        gs.detail_i1 = bid
+                                        gs.detail_i2 = -1
+                                        play_sfx("click")
+                                    break
+                            for i, ir in enumerate(item_bench_rects):
+                                if ir.collidepoint(mx, my) \
+                                        and i < len(gs.me["items"]):
+                                    panel_clicked = True
+                                    gs.dragging_item = gs.me["items"][i]
+                                    gs.dragging_item_idx = i
+                                    gs.item_click_start = (mx, my, i)
+                                    play_sfx("click")
+                                    break
+                            if getattr(gs, "_battle_sell_rect", None) \
+                                    and gs._battle_sell_rect.collidepoint(mx, my):
+                                panel_clicked = True
+                        # 点击己方战斗单位 → 打开详情弹窗（战斗棋盘棋子不可出售）
+                        for r, bu in gs._battle_ally_hit_rects:
+                            if r.collidepoint(mx, my):
+                                panel_clicked = True
+                                if bu.source_unit is not None:
+                                    gs.detail_unit = bu.source_unit
+                                    gs.detail_source_type = "board"
+                                    gs.detail_i1, gs.detail_i2 = bu.source_coords
+                                play_sfx("click")
+                                break
+                        if panel_clicked:
+                            continue
                         for r, idx in battle_selector_rects:
                             if r.collidepoint(mx, my):
                                 gs.watched_battle_idx = idx
@@ -8643,8 +9458,29 @@ def run_game_session(screen, clock, difficulty, font_lg, font_md, font_sm,
                         play_sfx("click")
                         continue
                     if gs.detail_unit is not None:
-                        gs.detail_unit = None
-                        play_sfx("click")
+                        # 详情弹窗底部【出售】按钮（备战/战斗弹窗统一带出售）
+                        sell_b = getattr(gs, "_detail_sell_rect", None)
+                        if sell_b and sell_b.collidepoint(mx, my):
+                            st = getattr(gs, "detail_source_type", None)
+                            di1 = gs.detail_i1
+                            di2 = gs.detail_i2
+                            if st == "board":
+                                gs.sell_unit_at("board", di1, di2)
+                            else:
+                                gs.sell_unit_at("bench", di1)
+                            gs.detail_unit = None
+                            play_sfx("click")
+                            continue
+                        # 点已装备图标 → 打开该装备详情
+                        for (ir, eq_item) in getattr(gs, "_detail_equip_hits", []):
+                            if ir.collidepoint(mx, my):
+                                gs.show_item_path_popup = True
+                                gs.item_path_id = copy.deepcopy(eq_item)
+                                play_sfx("click")
+                                break
+                        else:
+                            gs.detail_unit = None
+                            play_sfx("click")
                         continue
                     gs.mouse_down_pos = (mx, my)
                     top_h = H * 0.088
@@ -8679,6 +9515,8 @@ def run_game_session(screen, clock, difficulty, font_lg, font_md, font_sm,
                             gs.ai_assistant_say("no_gold")
                         continue
                     if trait_btn_rect and trait_btn_rect.collidepoint(mx, my):
+                        if not gs.show_trait_popup:
+                            gs._trait_scroll = 0
                         gs.show_trait_popup = not gs.show_trait_popup
                         play_sfx("click")
                         continue
@@ -8736,6 +9574,9 @@ def run_game_session(screen, clock, difficulty, font_lg, font_md, font_sm,
                                     gs.drag_unit = unit
                                 else:
                                     gs.detail_unit = unit
+                                    gs.detail_source_type = "bench"
+                                    gs.detail_i1 = bid
+                                    gs.detail_i2 = -1
                             hit = True
                             break
                     if hit:
@@ -8759,6 +9600,9 @@ def run_game_session(screen, clock, difficulty, font_lg, font_md, font_sm,
                                     gs.drag_unit = unit
                                 else:
                                     gs.detail_unit = unit
+                                    gs.detail_source_type = "board"
+                                    gs.detail_i1 = rid
+                                    gs.detail_i2 = cid
                             hit = True
                             break
                     if hit:
@@ -8787,13 +9631,48 @@ def run_game_session(screen, clock, difficulty, font_lg, font_md, font_sm,
                             gs.item_click_start = None
                             continue
                         placed = False
-                        for (r, bid) in bench_rects:
-                            if r.collidepoint(mx, my):
-                                if gs.viewing_player_idx == -1:
-                                    gs.equip_item_to(gs.dragging_item,
-                                                     "bench", bid)
-                                placed = True
-                                break
+                        if gs.is_battle_phase:
+                            # 战斗内：拖到己方战斗单位 = 仅佩戴（不可拆卸、不可合成）
+                            for r, bu in gs._battle_ally_hit_rects:
+                                if r.collidepoint(mx, my) \
+                                        and bu.source_unit is not None:
+                                    gs.equip_item_to(gs.dragging_item, "board",
+                                                     bu.source_coords[0],
+                                                     bu.source_coords[1],
+                                                     allow_combine=False)
+                                    placed = True
+                                    break
+                            if not placed:
+                                # 战斗备战席面板：完整操作（合成/拆卸/重铸）
+                                for r, bid in bench_rects:
+                                    if r.collidepoint(mx, my):
+                                        gs.equip_item_to(gs.dragging_item,
+                                                         "bench", bid)
+                                        placed = True
+                                        break
+                        else:
+                            # 备战阶段：物品栏内两个散件拖拽重叠直接合成
+                            for i, ir in enumerate(item_bench_rects):
+                                if ir.collidepoint(mx, my):
+                                    if i != gs.dragging_item_idx:
+                                        gs.try_combine_item_bench(
+                                            gs.dragging_item_idx, i)
+                                        placed = True
+                                    break
+                        if not placed:
+                            for (r, bid) in bench_rects:
+                                if r.collidepoint(mx, my):
+                                    if gs.viewing_player_idx == -1:
+                                        u = gs.me["bench"][bid]
+                                        if u is not None and u.get("is_pseudo_bench_only"):
+                                            # 纹章之书伪棋子不可装备
+                                            play_sfx("error")
+                                            gs._toast_msg("纹章之书不能装备道具")
+                                        else:
+                                            gs.equip_item_to(gs.dragging_item,
+                                                             "bench", bid)
+                                    placed = True
+                                    break
                         if not placed:
                             for (r, rid, cid) in board_rects:
                                 if r.collidepoint(mx, my):
@@ -8827,6 +9706,14 @@ def run_game_session(screen, clock, difficulty, font_lg, font_md, font_sm,
                     target_bench = next(
                         (bid for (r, bid) in bench_rects if r.collidepoint(mx, my)), -1)
                     if target_bench != -1:
+                        if gs.drag_unit is not None \
+                                and gs.drag_unit.get("is_pseudo_bench_only"):
+                            # 纹章之书伪棋子不允许拖拽移动（仅可出售触发弹窗）
+                            play_sfx("error")
+                            gs._toast_msg("纹章之书仅可出售，不能移动")
+                            gs.dragging = False
+                            gs.drag_unit = None
+                            continue
                         if st == "bench":
                             gs.me["bench"][i1], gs.me["bench"][target_bench] = \
                                 gs.me["bench"][target_bench], gs.me["bench"][i1]
@@ -8845,6 +9732,14 @@ def run_game_session(screen, clock, difficulty, font_lg, font_md, font_sm,
                             break
                     if target_board:
                         tr, tc = target_board
+                        if gs.drag_unit is not None \
+                                and gs.drag_unit.get("is_pseudo_bench_only"):
+                            # 纹章之书伪棋子禁止上棋盘
+                            play_sfx("error")
+                            gs._toast_msg("纹章之书不能上棋盘")
+                            gs.dragging = False
+                            gs.drag_unit = None
+                            continue
                         if st == "bench":
                             if count_board_units(gs.me) >= get_population_cap(gs.me) and \
                                     gs.me["board"][tr][tc] is None:
@@ -9301,7 +10196,7 @@ def run_v129_self_audit():
     errors = []
     required_traits = {
         "PotionClan": [2,4,6,8,10], "LeopardKind": [2,4,6,8,10],
-        "FrogTribe": [2,4,6], "Lumber": [2,4,6,8],
+        "FrogTribe": [2,4,6], "Lumber": [3,5,8],
         "Dancer": [2,3,5], "Elder": [2,3,5],
         "Thunder": [2,4,6,8], "Treasure": [3,4,5,6,8],
     }
@@ -9314,7 +10209,8 @@ def run_v129_self_audit():
         if not any(c.get("name") == name and c.get("cost") == 5 for c in CHAMPION_LIST):
             errors.append(f"三星五费 {name}")
     for kind in ("disassembler","haotian_hammer","masterwork_upgrader",
-                 "mega_neeko","radiant_chest","emblem_tome","artifact_forge"):
+                 "mega_neeko","radiant_chest","emblem_tome","artifact_forge",
+                 "giant_axe"):
         if kind not in SPECIAL_ITEM_DATA:
             errors.append(f"特殊装备 {kind}")
     for kind in ("leopard","potion","leopard_potion","fat_leopard","rotten_potion"):

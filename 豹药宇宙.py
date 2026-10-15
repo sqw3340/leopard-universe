@@ -277,7 +277,7 @@ def check_for_update(timeout=6):
         return {
             "version": remote_ver,
             "changelog": data.get("changelog", []) or [],
-            "download_url": data.get("download_url", "") or "",
+            "download_url": (data.get("download_url") or data.get("url") or ""),
         }
     except Exception as e:
         log_once("check_for_update", e)
@@ -295,6 +295,12 @@ def download_update(url, save_path, timeout=30):
             content = resp.read()
         if len(content) < 500:
             return False, "文件过小"
+        # 防止把 GitHub 错误页/HTML 当成 Python 覆盖当前游戏。
+        head = content[:2048].lstrip().lower()
+        if b"<html" in head or b"<!doctype" in head:
+            return False, "下载内容不是 Python 文件"
+        if b"import " not in head and b"# -*-" not in head:
+            return False, "下载内容不像 Python 源码"
         with open(tmp_path, "wb") as f:
             f.write(content)
         try:
@@ -339,6 +345,13 @@ def save_game(gs):
             "shop": gs.shop,
             "shop_locked": gs.shop_locked,
             "global_augment": gs.global_augment,
+            "bounty_shards": gs.bounty_shards,
+            "bounty_layer_current": gs.bounty_layer_current,
+            "bounty_last_layer_seen": gs.bounty_last_layer_seen,
+            "bounty_layer_options": gs.bounty_layer_options,
+            "pending_plunder": gs._pending_plunder,
+            "active_plunder": gs._active_plunder,
+            "bounty_capture_bonus": gs._bounty_capture_bonus,
             "pool_remaining": dict(_pool_remaining),
             "battle_log_history": gs.battle_log_history[-20:],
         }
@@ -393,6 +406,13 @@ def load_game(gs):
         gs.shop = data.get("shop", [])
         gs.shop_locked = data.get("shop_locked", False)
         gs.global_augment = data.get("global_augment", gs.global_augment)
+        gs.bounty_shards = int(data.get("bounty_shards", 0))
+        gs.bounty_layer_current = int(data.get("bounty_layer_current", 1))
+        gs.bounty_last_layer_seen = int(data.get("bounty_last_layer_seen", 1))
+        gs.bounty_layer_options = data.get("bounty_layer_options", []) or []
+        gs._pending_plunder = data.get("pending_plunder")
+        gs._active_plunder = data.get("active_plunder")
+        gs._bounty_capture_bonus = int(data.get("bounty_capture_bonus", 0))
         saved_pool = data.get("pool_remaining")
         if saved_pool:
             with _pool_lock:
@@ -402,12 +422,7 @@ def load_game(gs):
         gs.show_starter_popup = False
         gs.show_global_augment_popup = False
         gs.starter_chosen = True
-        gs.bounty_shards = 0
-        gs.bounty_layer_current = 1
-        gs.bounty_last_layer_seen = 1
-        gs.bounty_layer_options = []
         gs.show_bounty_popup = False
-        gs._pending_plunder = None
         gs.phase_timer = PREP_DURATION
         gs.is_battle_phase = False
         gs.game_over = False
@@ -1438,11 +1453,12 @@ SPECIAL_ITEM_DATA = {
     "emblem_treasure": ("财宝猎人纹章", "激活财宝猎人羁绊。"),
     "emblem_lumber": ("伐木纹章", "激活伐木羁绊。"),
     "disassembler": ("装备拆卸器", "无限次拆下目标英雄全部装备。"),
-    "haotian_hammer": ("昊天锤", "一次性随机重铸目标英雄的一件装备。"),
+    "haotian_hammer": ("昊天锤", "一次性随机重铸目标英雄的全部装备。"),
     "masterwork_upgrader": ("杰作升级器", "将目标英雄的成装升级为光明版。"),
     "mega_neeko": ("大妮蔻", "复制目标英雄的1星版本。"),
     "radiant_chest": ("光明宝箱", "选择该英雄推荐成装的光明版，三选一。"),
     "emblem_tome": ("纹章之书", "随机生成4个纹章供选择。"),
+    "orb": ("法球", "打开后随机获得一种野怪掉落奖励。"),
     "artifact_forge": ("豹药神器锻造器", "随机获得一件豹药神器。"),
 }
 
@@ -1515,12 +1531,14 @@ def _bounty_gain(treasure_cnt, won):
 
 
 def _bounty_item(item_id, name, desc="", stats=None):
+    extra = dict(stats or {})
+    special_kind = extra.pop("special_kind", None)
     return {
         "id": item_id, "name": name,
-        "desc": desc, "stats": dict(stats or {}),
+        "desc": desc, "stats": extra,
         "color": TREASURE_COLOR, "is_combined": False,
         "is_special": True,
-        "special_kind": item_id if item_id in SPECIAL_ITEM_DATA else None,
+        "special_kind": special_kind or (item_id if item_id in SPECIAL_ITEM_DATA else None),
     }
 
 
@@ -1755,10 +1773,11 @@ def apply_bounty_reward(gs, reward):
             for _ in range(int(kind[1])):
                 _add_bounty_item(gs, _bounty_item(
                     "orb_" + str(random.randint(1, 999999)), "法球",
-                    "野怪随机掉落物"))
+                    "野怪随机掉落物", {"special_kind": "orb"}))
         elif typ == "tome":
             _add_bounty_item(gs, _bounty_item(
-                "emblem_tome", "纹章之书", "购买后出售以选择4个随机纹章"))
+                "emblem_tome", "纹章之书", "使用后选择4个随机纹章之一",
+                {"special_kind": "emblem_tome"}))
         elif typ == "rune":
             _add_bounty_item(gs, make_rune_item(kind[1]))
         elif typ == "special":
@@ -4458,9 +4477,30 @@ class GameState:
         kind = item.get("special_kind")
         if kind not in SPECIAL_ITEM_DATA:
             return False
-        if not isinstance(target_unit, dict):
+        target = safe_unit(target_unit)
+        if target is None:
             return False
-        target = target_unit
+
+        if kind == "orb":
+            self.me["items"].pop(idx)
+            roll = random.randint(1, 4)
+            if roll == 1:
+                reward = new_item(random.choice(ITEM_IDS))
+                _add_bounty_item(self, reward)
+                self.battle_log = "法球：获得随机散件"
+            elif roll == 2:
+                reward = _make_random_combined_item()
+                _add_bounty_item(self, reward)
+                self.battle_log = "法球：获得随机成装"
+            elif roll == 3:
+                self.me["gold"] += random.randint(3, 10)
+                self.battle_log = "法球：获得随机金币"
+            else:
+                reward = make_special_item(random.choice(["haotian_hammer", "disassembler", "mega_neeko", "radiant_chest", "masterwork_upgrader"]))
+                _add_bounty_item(self, reward)
+                self.battle_log = "法球：获得随机特殊道具"
+            self._flush_free_item_store()
+            return True
 
         if kind == "disassembler":
             self.me["items"].pop(idx)
@@ -4477,7 +4517,8 @@ class GameState:
             old_items = list(target["items"])
             target["items"] = [_reroll_item(it) for it in old_items]
             self.me["items"].pop(idx)
-            self.battle_log = f"昊天锤：重铸 {champ_cn(target['name'])} 身上全部 {len(old_items)} 件装备"
+            self.battle_log = (f"昊天锤：重铸 {champ_cn(target['name'])} "
+                               f"身上全部 {len(old_items)} 件装备")
             return True
 
         if kind == "masterwork_upgrader":
@@ -4626,6 +4667,11 @@ class GameState:
         if unit is None:
             play_sfx("error")
             return False
+        if len(unit.get("items", [])) >= MAX_ITEMS_PER_UNIT:
+            play_sfx("error")
+            self.battle_log = f"{champ_cn(unit['name'])} 装备已满!"
+            self._toast_msg("装备已满!")
+            return False
         item = self.me["items"][item_idx]
         # 转职规则：同一棋子不能重复装备同一种转职；
         # 原生拥有该羁绊的棋子也不能再装备对应羁绊转职。
@@ -4649,21 +4695,6 @@ class GameState:
         if item.get("is_special") and not item.get("is_emblem"):
             # 特殊道具拖到棋子上即执行；普通装备/纹章才真正挂到棋子装备栏。
             return self.use_special_item(item, unit)
-        if len(unit.get("items", [])) >= MAX_ITEMS_PER_UNIT:
-            # 满装备时，先尝试与现有装备合成（例如：已有药灵符 + 拖入散件 → 合成纹章）
-            trial = try_combine_items_all(unit.get("items", []) + [item])
-            if len(trial) < len(unit.get("items", [])) + 1:
-                self.me["items"].pop(item_idx)
-                unit["items"] = trial
-                play_sfx("hex")
-                self.battle_log = "装备合成成功!"
-                enforce_population_cap(self.me)
-                self._flush_free_item_store()
-                return True
-            play_sfx("error")
-            self.battle_log = f"{champ_cn(unit['name'])} 装备已满!"
-            self._toast_msg("装备已满!")
-            return False
         item = self.me["items"].pop(item_idx)
         unit.setdefault("items", []).append(item)
         if item.get("is_emblem"):
@@ -4724,13 +4755,12 @@ class GameState:
         return mirror
 
     def start_battle(self):
+        if self.is_multiplayer:
+            self._start_multiplayer_battle()
+            return
         stage, rnd = self.stage
         round_type = get_round_type(stage, rnd)
         if stage == 1 and rnd == 1:
-            return
-
-        if self.is_multiplayer:
-            self._start_multiplayer_battle()
             return
 
         
@@ -4741,6 +4771,7 @@ class GameState:
         
         auto_fill_board(self.me)
         
+        self.refresh_shop()
         if round_type == "monster":
             self._start_monster_round()
             return
@@ -4802,6 +4833,17 @@ class GameState:
             self.battle_log = "未连接"
             self._toast_msg("未连接")
             return
+        stage, rnd = self.stage
+        round_type = get_round_type(stage, rnd)
+        # 野怪/选秀回合：双方独立进行，无需交换棋盘
+        if round_type == "monster":
+            self.multiplayer_phase = "battle"
+            self._start_monster_round()
+            return
+        if round_type == "carousel":
+            self.multiplayer_phase = "battle"
+            self._start_carousel()
+            return
         my_data = {
             "board": self.me["board"],
             "hex_bonuses": dict(self.me.get("hex_bonuses", {})),
@@ -4820,19 +4862,25 @@ class GameState:
         self.battle_log = "等待对手数据..."
 
     def _setup_multiplayer_battle(self, peer_msg):
-        peer_seed = int(peer_msg.get("seed", 0))
+        try:
+            peer_seed = int(peer_msg.get("seed", 0))
+        except Exception:
+            peer_seed = 0
         if not hasattr(self, "_saved_random_state"):
             self._saved_random_state = random.getstate()
         random.seed(self._my_seed ^ peer_seed)
 
+        default_bonuses = {"hp_mult": 0.0, "atk_mult": 0.0, "sp_mult": 0.0,
+                           "crit": 0.0, "atk_speed": 0.0, "income": 0, "armor": 0}
+        empty_board = [[None] * 7 for _ in range(4)]
         peer = create_empty_player(gold=0, is_ai=True)
-        peer["board"] = peer_msg.get("board",
-                                     [[None] * 7 for _ in range(4)])
-        peer["hex_bonuses"] = peer_msg.get(
-            "hex_bonuses",
-            {"hp_mult": 0.0, "atk_mult": 0.0, "sp_mult": 0.0, "crit": 0.0,
-             "atk_speed": 0.0, "income": 0, "armor": 0})
-        peer["hex_list"] = peer_msg.get("hex_list", [])
+        # 防御对手畸形/伪造数据：类型不符时回退默认值，避免崩溃
+        board = peer_msg.get("board", empty_board)
+        peer["board"] = board if isinstance(board, list) and len(board) == 4 else empty_board
+        hb = peer_msg.get("hex_bonuses", default_bonuses)
+        peer["hex_bonuses"] = hb if isinstance(hb, dict) else default_bonuses
+        hl = peer_msg.get("hex_list", [])
+        peer["hex_list"] = hl if isinstance(hl, list) else []
         peer["hp"] = 999
         peer["is_ai"] = True
 
@@ -5285,6 +5333,18 @@ class GameState:
             if hasattr(self, "_saved_random_state"):
                 random.setstate(self._saved_random_state)
                 del self._saved_random_state
+            # 推进 stage/rnd，与单机保持相同的回合循环(野怪/选秀/PVP)
+            stage, rnd = self.stage
+            if stage == 1:
+                if rnd < STAGE1_ROUNDS:
+                    self.stage = (1, rnd + 1)
+                else:
+                    self.stage = (2, 1)
+            else:
+                if rnd < STAGE_NORMAL_ROUNDS:
+                    self.stage = (stage, rnd + 1)
+                else:
+                    self.stage = (stage + 1, 1)
             self.battles = []
             self.shop_locked = False
             self.refresh_shop()
@@ -5292,8 +5352,18 @@ class GameState:
             self.phase_timer = 999999
             apply_income_and_xp(self.me)
             self.round_counter += 1
-            self.battle_log = f"第 {self.round_counter + 1} 局备战"
+            # 羁绊强化回合（与单机一致，每 HEX_ROUND_INTERVAL 局一次）
+            if self.round_counter >= HEX_ROUND_INTERVAL:
+                self.round_counter = 0
+                self.hex_choices = roll_hex_choices()
+                if len(self.hex_choices) > 0:
+                    self.show_hex_popup = True
+            _rt = get_round_type(*self.stage)
+            _rt_cn = {"augment": "强化", "monster": "野怪",
+                      "carousel": "选秀", "pvp": "PVP"}.get(_rt, "")
+            self.battle_log = f"第 {self.round_counter + 1} 局备战 ({_rt_cn})"
             if self.me["hp"] <= 0:
+                self.me["hp"] = 0
                 self.game_over = True
                 self.game_over_text = "失败"
             if self.peer_hp <= 0:
@@ -5331,6 +5401,7 @@ class GameState:
             play_sfx("victory")
             return
         self.battles = []
+        self.shop_locked = False
         self.refresh_shop()
         self.round_counter += 1
         if self.round_counter >= HEX_ROUND_INTERVAL:
@@ -6845,13 +6916,6 @@ def draw_bottom_info_panel(screen, gs, view_p, font_lg, font_md, font_sm,
                 active_cnt += 1
         draw_text(screen, f"激活羁绊: {active_cnt} / {len(tc)}",
                   mid_x + 12, ry, font_sm, GREEN_HP)
-    if tc.get("Treasure", 0) >= 3:
-        ry += 20
-        _layer = getattr(gs, "bounty_layer_current", 1)
-        _shards = getattr(gs, "bounty_shards", 0)
-        _max = 9 if tc.get("Treasure", 0) >= 8 else 8
-        draw_text(screen, f"收菜 第{_layer}/{_max}层  碎片 {_shards}/10",
-                  mid_x + 12, ry, font_sm, TREASURE_COLOR)
     ws = view_p.get("win_streak", 0)
     ls = view_p.get("lose_streak", 0)
     if ws >= 2 or ls >= 2:
@@ -7330,13 +7394,6 @@ def draw_game(screen, gs, font_lg, font_md, font_sm, font_dmg, W, H, mouse_pos):
                   hp_box.x + 20, hp_box.centery, font_md, GREEN_HP)
         draw_text(screen, f"好友 HP {gs.peer_hp}",
                   hp_box.right - 140, hp_box.centery, font_md, RED)
-        prep_btn = pygame.Rect(W // 2 - W * 0.18, H - H * 0.10, W * 0.36, 50)
-        hovered = prep_btn.collidepoint(mouse_pos)
-        draw_button(screen, prep_btn,
-                    (40, 90, 40) if hovered else (30, 65, 30),
-                    GREEN_HP, 10)
-        draw_text(screen, "准备战斗 (发送阵容)", prep_btn.centerx,
-                  prep_btn.centery, font_md, TEXT_WHITE, True)
 
     if gs.is_multiplayer and gs.multiplayer_phase == "wait_peer":
         draw_text(screen, "等待对手准备...", W // 2, H * 0.5,
@@ -7614,6 +7671,17 @@ def draw_game(screen, gs, font_lg, font_md, font_sm, font_dmg, W, H, mouse_pos):
         draw_bottom_info_panel(screen, gs, view_p, font_lg, font_md, font_sm,
                                 W, H, 10, bottom_y, W - 20, bottom_h)
 
+    # 准备战斗按钮画在底部面板之后，确保不被盖住、始终可见可点
+    if gs.is_multiplayer and gs.multiplayer_phase == "prep" \
+            and gs.viewing_player_idx == -1:
+        prep_btn = pygame.Rect(W // 2 - W * 0.18, H - H * 0.10, W * 0.36, 50)
+        hovered = prep_btn.collidepoint(mouse_pos)
+        draw_button(screen, prep_btn,
+                    (40, 90, 40) if hovered else (30, 65, 30),
+                    GREEN_HP, 10)
+        draw_text(screen, "准备战斗 (发送阵容)", prep_btn.centerx,
+                  prep_btn.centery, font_md, TEXT_WHITE, True)
+
     if gs.dragging and gs.drag_unit is not None and gs.viewing_player_idx == -1:
         sell_rect = pygame.Rect(10, shop_y, W - 20, shop_h)
         hovering_sell = sell_rect.collidepoint(mouse_pos)
@@ -7697,10 +7765,7 @@ def draw_game(screen, gs, font_lg, font_md, font_sm, font_dmg, W, H, mouse_pos):
                     is_active = (tier == i + 1)
                     mark = ">" if is_active else " "
                     col2 = GREEN_HP if is_active else (140, 140, 140)
-                    if effect_name:
-                        line = f"  {mark} ({thresholds[i]}) {effect_name} {eff_txt}"
-                    else:
-                        line = f"  {mark} ({thresholds[i]}) {eff_txt}"
+                    line = f"  {mark} ({thresholds[i]}) {effect_name} {eff_txt}"
                     draw_text(screen, line, tx + 20, line_y, font_sm, col2)
                     line_y += 18
             _role_class = {"ClassTank": "tank", "ClassArcher": "archer",
@@ -9116,6 +9181,11 @@ def main():
                 scene = "game"
             if lobby_mode == "join" and net and net.connected:
                 scene = "game"
+            # 连接失败/超时反馈：不再无限停在“连接中...”
+            if (lobby_mode == "join" and net
+                    and getattr(net, "_connect_done", False)
+                    and not net.connected):
+                status_msg = f"连接失败: {net.error or '超时或无响应'}"
 
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
@@ -9150,6 +9220,7 @@ def main():
                                 status_msg = f"启动失败: {net.error}"
                         elif join_btn and join_btn.collidepoint(mx, my):
                             play_sfx("click")
+                            net = NetworkManager()
                             lobby_mode = "join"
                             is_host = False
                             status_msg = "输入好友 IP"

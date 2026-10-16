@@ -1,6 +1,21 @@
 # -*- coding: utf-8 -*-
 """
 豹药宇宙 - 自走棋
+  v1.4.2 审计缺陷修复版
+    - 修复P0/P1/P2核心缺陷：模拟卡池隔离、三星五费扣池、原子存档、更新语法校验、训练源码写入保护、真伤/易伤、纹章羁绊同步、存档schema、联机协议、财宝9层三选一
+    - 新增模拟器脏数据清洗与多份源码备份
+  v1.4.1 噩梦入侵排位版
+    - 新增: 排位到达王者段位后，7名对手全部切换为当前最强噩梦AI（噩梦入侵）
+    - 新增: 入侵噩梦AI沿用三星五费博弈+学习玩家运营，随训练突破自动升级优化
+    - 新增: 排位页提示王者入侵规则；结算文案标注（噩梦AI入侵）
+  v1.4.0 恭喜发财·三星五费博弈·AI学习玩家运营版
+    - 新增: 恭喜发财独立模式（五费开局/大妮蔻狂欢/全员噩梦最强AI）
+    - 新增: 大妮蔻获取途径扩充：财宝高层收菜/野怪法球/血量跌破50/海克斯
+    - 新增: 恭喜发财阶段6结束存活单位100%保底大妮蔻
+    - 新增: 噩梦/极限AI主动追三星五费（条件齐备才启动，追无望及时止损）
+    - 新增: 场上有人三星五费时，其余极限AI追别的五费对抗，已三星的牌不再抢
+    - 新增: 噩梦AI学习玩家运营（模仿运营倾向+针对性克制），设置可开关/一键清空样本
+    - 新增: 主菜单【恭喜发财】入口与专属页面，与排位/普通/噩梦完全隔离
   v1.3.3 噩梦模式·挑战最强AI·内置段位池版
     - 新增: 噩梦模式难度（7名对手全部为当前最强AI，收入+75%，挑战失败记录对局供AI升级）
     - 新增: 主菜单【挑战最强AI】专属页面（显示当前最强AI段位/分数，一键开始挑战）
@@ -89,7 +104,15 @@ import time
 import urllib.request
 import json
 import re
+import ast
+import tempfile
+import contextlib
 from collections import deque
+
+# v1.4.2 safety locks / isolated simulation state
+_SOURCE_WRITE_LOCK = threading.RLock()
+_AI_PARAMS_LOCK = threading.RLock()
+_SIM_POOL_LOCAL = threading.local()
 
 pygame.display.init()
 pygame.font.init()
@@ -204,12 +227,47 @@ DIFFICULTY_COLOR = {"easy": (120, 220, 120), "normal": (110, 170, 240),
                     "hard": (255, 170, 60), "extreme": (230, 80, 80),
                     "nightmare": (200, 60, 230)}
 
-CURRENT_VERSION = "1.3.3"
+CURRENT_VERSION = "1.4.2"
 # 更新源：填你自己的远程 version.json 地址（GitHub raw 即可）
 # 留空 "" 则关闭检测更新
 UPDATE_CHECK_URL = "https://fastly.jsdelivr.net/gh/sqw3340/leopard-universe@main/version.json"
 
 CHANGELOG_TEXT = [
+    "v1.4.2  稳定性强化·全面缺陷修复版",
+    "  · 【重大修复】修复离线训练污染真实公共卡池的问题，训练模拟与玩家对局彻底隔离",
+    "  · 【重大修复】修复噩梦AI追三星五费不扣公共卡池的问题，恢复正常卡池博弈",
+    "  · 【存档修复】存档改为原子写入，并增加结构校验、损坏隔离与旧版本字段兼容",
+    "  · 【更新修复】自动更新下载后先进行AST/编译校验，避免错误源码直接覆盖本体",
+    "  · 【源码安全】训练固化AI与自动更新统一源码写入锁，并增加多份备份保护",
+    "  · 【战斗修复】真实伤害不再受到护甲/魔抗减免；负数减伤正确实现易伤",
+    "  · 【装备修复】拆卸器/昊天锤处理纹章后自动同步羁绊，清理非法装备与残留羁绊",
+    "  · 【棋子修复】safe_unit脏数据修复、法师技能伤害类型兜底、星级边界校验",
+    "  · 【财宝修复】财宝猎人9层终极掠夺恢复三选一奖励机制",
+    "  · 【联机修复】强化半包、断线、EOF、畸形数据、超大数据包防护",
+    "  · 【AI修复】训练参数采用独立候选+线程锁，异常候选正确淘汰，避免污染前台AI",
+    "  · 【模拟器】增加人口、棋盘、装备、None、负数及非法字段等脏数据清洗",
+    "  · 【稳定性】通过24项自动化单元测试，并完成3000局随机脏数据Fuzz无崩溃验证",
+    "  · 【版本】本版本为v1.4.2正式缺陷修复基准版本，建议所有玩家从本版本重新训练AI",
+    "v1.4.1  噩梦入侵排位版",
+    "  · 新增 排位到达王者段位后：7名对手全部切换为当前最强噩梦AI（噩梦入侵）",
+    "  · 新增 入侵噩梦AI沿用三星五费博弈+学习玩家运营，随训练突破自动升级优化",
+    "  · 新增 排位页提示王者入侵规则；排位结算文案标注（噩梦AI入侵）",
+    "  · 修复 恭喜发财开局选秀候选改为5费（原为1费），对手开局1费同步换为随机5费",
+    "  · 修复 设置页『噩梦AI学习玩家运营』开关点击闪退（局部变量未声明global）",
+    "  · 优化 主菜单UI：双列布局+按钮图标+信息卡片+装饰光效",
+    "  · 说明 王者之下排位梯度不变，入侵只作用于王者段位，强度随训练自动提升",
+    "",
+    "v1.4.0  恭喜发财·三星五费博弈·AI学习玩家运营版",
+    "  · 新增 恭喜发财独立模式：开局全员（你+7对手）随机5费，节奏更快、资源更丰富",
+    "  · 新增 大妮蔻获取途径扩充：财宝高层收菜/野怪法球/血量跌破50/海克斯强化",
+    "  · 新增 恭喜发财阶段6结束：存活单位100%获得1张大妮蔻（淘汰不领、一次性）",
+    "  · 新增 噩梦/极限AI主动追三星五费：核心5费囤够+锁血+存活少+金币足才启动",
+    "  · 新增 三星五费对抗博弈：场上有人三星时其余极限AI去追别的五费对抗，追无望止损抢名次",
+    "  · 新增 已有人三星的那张牌其余AI不再抢（卡池只剩9张，避免死磕浪费经济）",
+    "  · 新增 噩梦AI学习玩家运营：多局积累画像→模仿你的思路+针对性克制（设置可开关/一键清空）",
+    "  · 新增 主菜单【恭喜发财】专属入口页面；该模式与排位/普通/噩梦完全隔离",
+    "  · 说明 三星五费博弈仅限噩梦/恭喜发财，排位段位AI保持校准梯度不变",
+    "",
     "v1.3.3  噩梦模式·挑战最强AI·内置段位池版",
     "  · 新增 噩梦模式难度：7名对手全部为当前最强AI（收入+75%），对局记录供AI自我升级",
     "  · 新增 主菜单【挑战最强AI】专属页面：显示当前最强AI段位/分数，一键开始挑战",
@@ -374,42 +432,87 @@ def check_for_update(timeout=6):
 
 import urllib.parse
 
+def _atomic_write_bytes(path, data):
+    """原子写入二进制文件：先写临时文件并fsync，再os.replace。"""
+    directory = os.path.dirname(os.path.abspath(path)) or "."
+    fd, tmp = tempfile.mkstemp(prefix=".baoyao_", suffix=".tmp", dir=directory)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+        return True
+    except Exception:
+        try:
+            os.remove(tmp)
+        except Exception:
+            pass
+        raise
+
+
+def _atomic_write_text(path, text):
+    return _atomic_write_bytes(path, text.encode("utf-8"))
+
+
+def _validate_python_source(content, filename="<update>"):
+    """更新覆盖前同时做UTF-8、AST、compile校验。"""
+    text = content.decode("utf-8")
+    ast.parse(text, filename=filename)
+    compile(text, filename, "exec")
+    return text
+
+
+def _rotate_source_backups(src_path, text, keep=3):
+    """保留多份源码备份，避免训练/更新共用单一bak互相覆盖。"""
+    for i in range(keep, 0, -1):
+        old = src_path + (".bak" if i == 1 else f".bak.{i-1}")
+        new = src_path + f".bak.{i}"
+        if os.path.exists(old):
+            try:
+                os.replace(old, new)
+            except Exception:
+                pass
+    _atomic_write_text(src_path + ".bak", text)
+
+
 def download_update(url, save_path, timeout=30):
     if not url:
         return False, "下载链接为空"
+    tmp_path = save_path + ".new"
     try:
-        # 自动将 GitHub 源替换为 jsdelivr 镜像，解决国内连接被拒问题
         if "raw.githubusercontent.com" in url:
             url = url.replace("raw.githubusercontent.com", "fastly.jsdelivr.net/gh")
             url = url.replace("/main/", "@main/")
-        # 修复中文路径导致的 ascii 编码错误，同时确保 @ 不被转义为 %40
         url = urllib.parse.quote(url, safe=':/?=&%#@')
-        req = urllib.request.Request(
-            url, headers={"User-Agent": "BaoYaoUniverse"})
-        tmp_path = save_path + ".new"
+        req = urllib.request.Request(url, headers={"User-Agent": "BaoYaoUniverse"})
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             content = resp.read()
         if len(content) < 500:
             return False, "文件过小"
-        # 防止把 GitHub 错误页/HTML 当成 Python 覆盖当前游戏。
         head = content[:2048].lstrip().lower()
         if b"<html" in head or b"<!doctype" in head:
             return False, "下载内容不是 Python 文件"
-        if b"import " not in head and b"# -*-" not in head:
-            return False, "下载内容不像 Python 源码"
-        with open(tmp_path, "wb") as f:
-            f.write(content)
         try:
+            text = _validate_python_source(content, save_path)
+        except (UnicodeDecodeError, SyntaxError, ValueError) as e:
+            return False, f"Python语法校验失败: {e}"
+        with _SOURCE_WRITE_LOCK:
+            _atomic_write_bytes(tmp_path, content)
             if os.path.exists(save_path):
-                backup = save_path + ".bak"
-                if os.path.exists(backup):
-                    os.remove(backup)
-                os.replace(save_path, backup)
-        except Exception:
-            pass
-        os.replace(tmp_path, save_path)
+                with open(save_path, "r", encoding="utf-8") as f:
+                    old_text = f.read()
+                # 备份也必须是可恢复源码
+                ast.parse(old_text, filename=save_path)
+                _rotate_source_backups(save_path, old_text, keep=3)
+            os.replace(tmp_path, save_path)
         return True, ""
     except Exception as e:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
         log_once("download_update", e)
         return False, str(e)
 
@@ -429,10 +532,12 @@ SAVE_FILE = "savegame.pkl"
 
 def save_game(gs):
     if gs.is_multiplayer:
-        return
+        return False
     try:
+        with _pool_lock:
+            pool_snapshot = dict(_pool_remaining)
         data = {
-            "version": 1,
+            "version": 2,
             "difficulty": gs.difficulty,
             "me": gs.me,
             "players": gs.players,
@@ -448,13 +553,27 @@ def save_game(gs):
             "pending_plunder": gs._pending_plunder,
             "active_plunder": gs._active_plunder,
             "bounty_capture_bonus": gs._bounty_capture_bonus,
-            "pool_remaining": dict(_pool_remaining),
+            "pool_remaining": pool_snapshot,
             "battle_log_history": gs.battle_log_history[-20:],
         }
-        with open(SAVE_FILE, "wb") as f:
-            pickle.dump(data, f)
+        directory = os.path.dirname(os.path.abspath(SAVE_FILE)) or "."
+        fd, tmp = tempfile.mkstemp(prefix=".savegame_", suffix=".tmp", dir=directory)
+        try:
+            with os.fdopen(fd, "wb") as f:
+                pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, SAVE_FILE)
+        except Exception:
+            try:
+                os.remove(tmp)
+            except Exception:
+                pass
+            raise
+        return True
     except Exception as e:
         log_once("save_game", e)
+        return False
 
 
 def has_save():
@@ -488,34 +607,108 @@ def delete_save():
         pass
 
 
+def _validate_unit_schema(u):
+    if not isinstance(u, dict):
+        return u is None
+    if not isinstance(u.get("name", ""), str):
+        return False
+    star = u.get("star", 1)
+    if not isinstance(star, int) or not 1 <= star <= MAX_STAR:
+        return False
+    items = u.get("items", [])
+    traits = u.get("traits", [])
+    return isinstance(items, list) and isinstance(traits, list)
+
+
+def _validate_player_schema(p):
+    if not isinstance(p, dict):
+        return False
+    if not isinstance(p.get("board"), list) or len(p["board"]) != 4:
+        return False
+    if any(not isinstance(row, list) or len(row) != 7 for row in p["board"]):
+        return False
+    if not isinstance(p.get("bench"), list) or len(p["bench"]) != 8:
+        return False
+    if not isinstance(p.get("items", []), list):
+        return False
+    for row in p["board"]:
+        if any(not _validate_unit_schema(u) for u in row):
+            return False
+    if any(not _validate_unit_schema(u) for u in p["bench"]):
+        return False
+    return True
+
+
+def _validate_save_data(data):
+    if not isinstance(data, dict):
+        return False
+    if not isinstance(data.get("me"), dict) or not _validate_player_schema(data["me"]):
+        return False
+    players = data.get("players")
+    if not isinstance(players, list) or not players:
+        return False
+    if any(not _validate_player_schema(p) for p in players):
+        return False
+    stage = data.get("stage", (1, 1))
+    if not isinstance(stage, (tuple, list)) or len(stage) != 2:
+        return False
+    pool = data.get("pool_remaining", {})
+    if not isinstance(pool, dict):
+        return False
+    return True
+
+
+def _is_wearable_for_recovery(it):
+    try:
+        return is_wearable_item(it)
+    except Exception:
+        return False
+
+
 def load_game(gs):
     if not has_save():
         return False
     try:
         with open(SAVE_FILE, "rb") as f:
             data = pickle.load(f)
+        if not _validate_save_data(data):
+            bad = SAVE_FILE + ".bad"
+            try:
+                os.replace(SAVE_FILE, bad)
+            except Exception:
+                pass
+            return False
+        # 先对临时数据做脏道具清理，再一次性提交到GameState。
+        players = data["players"]
+        me = data["me"]
+        _reclaim_illegal_equipped_items(me)
+        for pl in players:
+            _reclaim_illegal_equipped_items(pl)
         gs.difficulty = data.get("difficulty", gs.difficulty)
-        gs.me = data.get("me", gs.me)
-        # 旧存档不再补发常驻巨斧；改为 sync_lumber_marks 按伐木棋子存在条件发放
-        gs.players = data.get("players", gs.players)
+        gs.me = me
+        gs.players = players
         gs.stage = tuple(data.get("stage", (1, 1)))
-        gs.round_counter = data.get("round_counter", 0)
-        gs.shop = data.get("shop", [])
-        gs.shop_locked = data.get("shop_locked", False)
+        gs.round_counter = int(data.get("round_counter", 0))
+        gs.shop = data.get("shop", []) if isinstance(data.get("shop", []), list) else []
+        gs.shop_locked = bool(data.get("shop_locked", False))
         gs.global_augment = data.get("global_augment", gs.global_augment)
-        gs.bounty_shards = int(data.get("bounty_shards", 0))
-        gs.bounty_layer_current = int(data.get("bounty_layer_current", 1))
-        gs.bounty_last_layer_seen = int(data.get("bounty_last_layer_seen", 1))
+        gs.bounty_shards = max(0, int(data.get("bounty_shards", 0)))
+        gs.bounty_layer_current = max(1, min(9, int(data.get("bounty_layer_current", 1))))
+        gs.bounty_last_layer_seen = max(1, min(9, int(data.get("bounty_last_layer_seen", 1))))
         gs.bounty_layer_options = data.get("bounty_layer_options", []) or []
         gs._pending_plunder = data.get("pending_plunder")
         gs._active_plunder = data.get("active_plunder")
-        gs._bounty_capture_bonus = int(data.get("bounty_capture_bonus", 0))
-        saved_pool = data.get("pool_remaining")
-        if saved_pool:
-            with _pool_lock:
-                _pool_remaining.clear()
-                _pool_remaining.update(saved_pool)
-        gs.battle_log_history = data.get("battle_log_history", [])
+        gs._bounty_capture_bonus = max(0, int(data.get("bounty_capture_bonus", 0)))
+        saved_pool = data.get("pool_remaining", {})
+        with _pool_lock:
+            _pool_remaining.clear()
+            for name, value in saved_pool.items():
+                if isinstance(name, str) and isinstance(value, int) and value >= 0:
+                    base = get_base_template(name)
+                    if base and not base.get("no_shop"):
+                        cap = POOL_SIZES.get(base.get("cost", 1), 20)
+                        _pool_remaining[name] = min(cap, value)
+        gs.battle_log_history = data.get("battle_log_history", [])[-20:]
         gs.show_starter_popup = False
         gs.show_global_augment_popup = False
         gs.starter_chosen = True
@@ -525,6 +718,9 @@ def load_game(gs):
         gs.game_over = False
         gs.battles = []
         return True
+    except (pickle.UnpicklingError, EOFError, AttributeError, ValueError, TypeError, OSError) as e:
+        log_once("load_game", e)
+        return False
     except Exception as e:
         log_once("load_game", e)
         return False
@@ -621,7 +817,7 @@ class NetworkManager:
         if not self.conn:
             return False
         try:
-            payload = pickle.dumps(data)
+            payload = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
             header = len(payload).to_bytes(8, "big")
             self.conn.sendall(header + payload)
             return True
@@ -638,16 +834,24 @@ class NetworkManager:
             if self._pending_len is None:
                 header = self._recv_exact(8)
                 if not header:
+                    self.connected = False
                     return None
                 length = int.from_bytes(header, "big")
-                if length <= 0 or length > 10_000_000:
+                if length <= 0 or length > 2_000_000:
+                    self.error = "网络数据包非法或过大"
+                    self.connected = False
+                    self.close()
                     return None
                 self._pending_len = length
             data = self._recv_exact(self._pending_len)
             if data is None:
+                self.connected = False
                 return None
             self._pending_len = None
-            return pickle.loads(data)
+            obj = json.loads(data.decode("utf-8"))
+            if not isinstance(obj, dict):
+                raise ValueError("网络消息必须是JSON对象")
+            return obj
         except socket.timeout:
             return None
         except Exception as e:
@@ -666,6 +870,7 @@ class NetworkManager:
                 self.error = str(e)
                 return None
             if not chunk:
+                self.connected = False
                 return None
             self._recv_buf += chunk
         result = self._recv_buf[:n]
@@ -727,52 +932,67 @@ _pool_remaining = {}
 _pool_lock = threading.RLock()
 
 
+def _make_pool_snapshot():
+    return {c["name"]: POOL_SIZES.get(c.get("cost", 1), 20)
+            for c in CHAMPION_LIST if not c.get("no_shop")}
+
+
+def _active_pool():
+    pool = getattr(_SIM_POOL_LOCAL, "pool", None)
+    return pool if pool is not None else _pool_remaining
+
+
 def init_pool():
     global _pool_remaining
+    # 正常游戏初始化真实公共池；模拟器通过isolated_sim_pool()使用线程本地池。
     with _pool_lock:
-        _pool_remaining = {}
-        for c in CHAMPION_LIST:
-            if c.get("no_shop"):
-                continue
-            _pool_remaining[c["name"]] = POOL_SIZES.get(c["cost"], 20)
+        _pool_remaining = _make_pool_snapshot()
 
 
 def consume_pool(name, count=1):
     """Consume available shared copies safely; returns the number consumed."""
     count = max(0, int(count))
-    with _pool_lock:
-        if name not in _pool_remaining or count <= 0:
+    pool = _active_pool()
+    lock = _pool_lock if pool is _pool_remaining else contextlib.nullcontext()
+    with lock:
+        if name not in pool or count <= 0:
             return 0
-        consumed = min(count, _pool_remaining[name])
-        _pool_remaining[name] -= consumed
+        consumed = min(count, pool[name])
+        pool[name] -= consumed
         return consumed
 
 
 def try_consume_pool(name, count=1):
     """Atomically reserve copies, preventing a stale shop from overselling."""
     count = max(0, int(count))
-    with _pool_lock:
-        if name not in _pool_remaining or _pool_remaining[name] < count:
+    pool = _active_pool()
+    lock = _pool_lock if pool is _pool_remaining else contextlib.nullcontext()
+    with lock:
+        if name not in pool or pool[name] < count:
             return False
-        _pool_remaining[name] -= count
+        pool[name] -= count
         return True
 
 
 def return_pool(name, count=1):
     count = max(0, int(count))
-    with _pool_lock:
-        if name not in _pool_remaining or count <= 0:
+    pool = _active_pool()
+    lock = _pool_lock if pool is _pool_remaining else contextlib.nullcontext()
+    with lock:
+        if name not in pool or count <= 0:
             return 0
         base = get_base_template(name)
         cap = POOL_SIZES.get(base.get("cost", 1), 20) if base else 20
-        before = _pool_remaining[name]
-        _pool_remaining[name] = min(cap, before + count)
-        return _pool_remaining[name] - before
+        before = pool[name]
+        pool[name] = min(cap, before + count)
+        return pool[name] - before
 
 
 def pool_remaining(name):
-    with _pool_lock:
-        return _pool_remaining.get(name, 20)
+    pool = _active_pool()
+    lock = _pool_lock if pool is _pool_remaining else contextlib.nullcontext()
+    with lock:
+        return pool.get(name, 0)
 
 
 CHAMP_NAME_CN = {
@@ -2470,7 +2690,7 @@ def get_skill_cd(cost, star):
 def safe_unit(u):
     if not isinstance(u, dict):
         return None
-    u = dict(u)
+    # 原地修复，确保调用方无需接收返回值也能得到清洗结果。
     defaults = {"star": 1, "cost": 1, "name": "Unknown", "hp": 500,
                 "ad": 40, "max_mana": 30, "mana_per_attack": 10,
                 "attack_cooldown": 1.2, "sp_base_dmg": 0,
@@ -2485,7 +2705,11 @@ def safe_unit(u):
     if not isinstance(u.get("items"), list):
         u["items"] = list(u.get("items") or [])
     if u.get("skill_dmg_type") is None:
-        u["skill_dmg_type"] = "physical"
+        u["skill_dmg_type"] = ("magic" if u.get("role") == "mage" else "physical")
+    try:
+        u["star"] = max(1, min(MAX_STAR, int(u.get("star", 1))))
+    except Exception:
+        u["star"] = 1
     return u
 
 
@@ -2573,6 +2797,12 @@ def trigger_three_star_5cost(unit, allies, enemies, effects, screen_w, screen_h)
 def make_unit_with_star(name, star):
     base = get_base_template(name)
     if base is None:
+        return None
+    try:
+        star = int(star)
+    except Exception:
+        return None
+    if star < 1 or star > MAX_STAR:
         return None
     u = copy.deepcopy(base)
     u["star"] = star
@@ -2676,7 +2906,14 @@ def get_population_cap(p):
             if u is None:
                 continue
             for item in u.get("items", []):
-                cap += item.get("stats", {}).get("population", 0)
+                if not isinstance(item, dict):
+                    continue
+                stats = item.get("stats", {})
+                if not isinstance(stats, dict):
+                    continue
+                pop = stats.get("population", 0)
+                if isinstance(pop, (int, float)) and not isinstance(pop, bool) and math.isfinite(float(pop)):
+                    cap += int(pop)
     return cap
 
 
@@ -2728,8 +2965,24 @@ ROLE_TO_CLASS_TRAIT = {"tank": "ClassTank", "archer": "ClassArcher",
                         "mage": "ClassMage", "warrior": "ClassWarrior"}
 
 
+def sync_unit_traits_from_items(unit):
+    """根据原生羁绊+当前可穿戴纹章重建棋子羁绊，杜绝拆卸/重铸残留。"""
+    if not isinstance(unit, dict):
+        return unit
+    base = get_base_template(unit.get("name", "")) or {}
+    traits = list(base.get("traits", []))
+    for it in unit.get("items", []) if isinstance(unit.get("items", []), list) else []:
+        if not _is_wearable_for_recovery(it):
+            continue
+        if it.get("is_emblem"):
+            trait = it.get("emblem_trait") or it.get("trait")
+            if trait and trait not in traits:
+                traits.append(trait)
+    unit["traits"] = traits
+    return unit
+
+
 def count_traits(player):
-    seen_names = set()
     tc = {}
     for row in player["board"]:
         for u in row:
@@ -2738,9 +2991,6 @@ def count_traits(player):
             name = u.get("name", "")
             if name == "Tuanzi":
                 continue
-            if name in seen_names:
-                continue
-            seen_names.add(name)
             for t in u.get("traits", []):
                 if t == "Summon":
                     continue
@@ -3502,36 +3752,30 @@ BUILTIN_EXTREME_AI = {
 
 
 def _overwrite_builtin_ai_in_source(params):
-    """训练突破时把最优AI权重自动固化进豹药宇宙.py源码。
-    只替换 BEGIN/END 标记块内的字典，其余代码不动；
-    写前备份 .bak，写后原子替换，防止写一半损坏源码。"""
+    """训练突破安全固化：统一源码锁、AST校验、多份bak、原子替换。"""
     src_path = get_script_path()
     if not src_path or not os.path.exists(src_path):
         return False
     try:
-        with open(src_path, "r", encoding="utf-8") as f:
-            text = f.read()
-        marker = "BEGIN BUILTIN_EXTREME_AI AUTO SAVE"
-        end_marker = "END BUILTIN_EXTREME_AI AUTO SAVE"
-        if marker not in text or end_marker not in text:
-            return False
-        body = ",\n    ".join(f'"{k}": {v!r}' for k, v in params.items())
-        new_dict = "{\n    " + body + ",\n}"
-        pattern = re.compile(
-            r"BUILTIN_EXTREME_AI = .*?\n# ----- " + re.escape(end_marker), re.S)
-        if not pattern.search(text):
-            return False
-        replacement = ("BUILTIN_EXTREME_AI = " + new_dict +
-                       "\n# ----- " + end_marker)
-        text2 = pattern.sub(replacement, text)
-        # 先备份当前源码，再原子写入
-        with open(src_path + ".bak", "w", encoding="utf-8") as f:
-            f.write(text)
-        tmp = src_path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            f.write(text2)
-        os.replace(tmp, src_path)
-        return True
+        with _SOURCE_WRITE_LOCK:
+            with open(src_path, "r", encoding="utf-8") as f:
+                text = f.read()
+            marker = "BEGIN BUILTIN_EXTREME_AI AUTO SAVE"
+            end_marker = "END BUILTIN_EXTREME_AI AUTO SAVE"
+            if marker not in text or end_marker not in text:
+                return False
+            body = ",\n    ".join(f'"{k}": {v!r}' for k, v in params.items())
+            new_dict = "{\n    " + body + ",\n}"
+            pattern = re.compile(r"BUILTIN_EXTREME_AI = .*?\n# ----- " + re.escape(end_marker), re.S)
+            if not pattern.search(text):
+                return False
+            replacement = "BUILTIN_EXTREME_AI = " + new_dict + "\n# ----- " + end_marker
+            text2 = pattern.sub(replacement, text)
+            ast.parse(text2, filename=src_path)
+            compile(text2, src_path, "exec")
+            _rotate_source_backups(src_path, text, keep=3)
+            _atomic_write_text(src_path, text2)
+            return True
     except Exception as e:
         log_once("overwrite_builtin_ai", e)
         return False
@@ -3561,8 +3805,9 @@ def load_extreme_params():
 
 def save_extreme_params():
     try:
-        with open(EXTREME_AI_PARAMS_FILE, "w", encoding="utf-8") as f:
-            json.dump(EXTREME_AI_PARAMS, f, ensure_ascii=False, indent=2)
+        with _AI_PARAMS_LOCK:
+            text = json.dumps(EXTREME_AI_PARAMS, ensure_ascii=False, indent=2)
+        _atomic_write_text(EXTREME_AI_PARAMS_FILE, text)
         return True
     except Exception as e:
         log_once("save_extreme_params", e)
@@ -3595,7 +3840,196 @@ def get_ai_behavior(p):
     if mult <= 1.4:
         return AI_BEHAVIOR["hard"]
     # 极限 AI：返回可进化参数字典（含 behavior 字段 + 打分权重）
-    return EXTREME_AI_PARAMS
+    with _AI_PARAMS_LOCK:
+        return dict(EXTREME_AI_PARAMS)
+
+
+# ============================================================
+#  恭喜发财模式 & 三星五费博弈 & 噩梦AI学习玩家运营
+# ============================================================
+CONGRATS_NEECO_STAGE = 6          # 恭喜发财：阶段6结束存活单位100%保底大妮蔻
+CONGRATS_NEECO_HP_TRIGGER = 50    # 恭喜发财：血量首次≤50给大妮蔻
+_LEARN_PLAYER_STYLE = True        # 噩梦AI学习玩家运营开关（设置界面可切换）
+
+
+def _congrats_five_cost_list():
+    return [c for c in CHAMPION_LIST if c.get("cost") == 5 and not c.get("no_shop")]
+
+
+def _give_congrats_start_unit(p):
+    """恭喜发财：开局给一张随机五费进备战席（玩家与AI通用）。"""
+    five = _congrats_five_cost_list()
+    if not five:
+        return False
+    empty = next((i for i, s in enumerate(p["bench"]) if s is None), None)
+    if empty is None:
+        return False
+    available = [c for c in five if pool_remaining(c["name"]) > 0]
+    if not available:
+        return False
+    c = copy.deepcopy(random.choice(available))
+    if not try_consume_pool(c["name"], 1):
+        return False
+    p["bench"][empty] = c
+    return True
+
+
+def _congrats_round_checks(gs):
+    """恭喜发财回合检查：阶段6结束100%保底大妮蔻；血量首次≤50给大妮蔻。"""
+    if (getattr(gs, "_congrats_mode", False)
+            and not getattr(gs, "_congrats_neeko_given", False)
+            and gs.stage[0] >= CONGRATS_NEECO_STAGE):
+        gs._congrats_neeko_given = True
+        gave = 0
+        for p in [gs.me] + gs.players:
+            if p.get("hp", 0) > 0 and len(p.get("items", [])) < MAX_ITEM_BENCH:
+                p.setdefault("items", []).append(make_special_item("mega_neeko"))
+                gave += 1
+        gs.battle_log = (f"恭喜发财 · 阶段{gs.stage[0]}结算 · "
+                         f"存活单位100%获得【大妮蔻】×1！({gave}家)")
+        gs.battle_log_history.append(gs.battle_log)
+    if (getattr(gs, "_congrats_mode", False)
+            and not getattr(gs, "_congrats_50hp_given", False)
+            and gs.me.get("hp", 100) <= CONGRATS_NEECO_HP_TRIGGER):
+        gs._congrats_50hp_given = True
+        if len(gs.me.get("items", [])) < MAX_ITEM_BENCH:
+            gs.me.setdefault("items", []).append(make_special_item("mega_neeko"))
+            gs.battle_log = "恭喜发财 · 血量跌破50 · 获得【大妮蔻】×1！"
+            gs.battle_log_history.append(gs.battle_log)
+
+
+def _star_to_copies(star):
+    """棋子星级折算持有张数：1星=1张 / 2星=3张 / 3星=9张。"""
+    return {1: 1, 2: 3, 3: 9}.get(star, star)
+
+
+def _hold_count(p, name):
+    """统计玩家持有某棋子的总张数（1星=1/2星=3/3星=9，棋盘+备战席）。"""
+    total = 0
+    for row in p.get("board", []):
+        for u in row:
+            if u and u.get("name") == name:
+                total += _star_to_copies(u.get("star", 1))
+    for u in p.get("bench", []):
+        if u and u.get("name") == name:
+            total += _star_to_copies(u.get("star", 1))
+    return total
+
+
+def _five_holdings(p):
+    """返回该玩家持有的五费 dict: name -> 持有张数。"""
+    out = {}
+    for row in p.get("board", []):
+        for u in row:
+            if u and not u.get("is_pseudo_bench_only"):
+                base = get_base_template(u.get("name", ""))
+                if base and base.get("cost") == 5:
+                    out[u["name"]] = out.get(u["name"], 0) + _star_to_copies(u.get("star", 1))
+    for u in p.get("bench", []):
+        if u:
+            base = get_base_template(u.get("name", ""))
+            if base and base.get("cost") == 5:
+                out[u["name"]] = out.get(u["name"], 0) + _star_to_copies(u.get("star", 1))
+    return out
+
+
+def _someone_3star5(players, skip=None):
+    """场上是否有玩家拥有三星五费；返回已三星的五费名集合。"""
+    three = set()
+    for q in players or []:
+        if q is skip or q.get("hp", 0) <= 0:
+            continue
+        for name, cnt in _five_holdings(q).items():
+            if cnt >= 9:
+                three.add(name)
+    return three
+
+
+def _ai_chase_turn(p):
+    """追星回合：大D目标五费，其余不买，保留金币底线，不卖目标。"""
+    target = p.get("_chase_target")
+    if not target:
+        return
+    for _ in range(50):
+        if p.get("gold", 0) < 12:
+            break
+        p["gold"] = p.get("gold", 0) - REFRESH_COST
+        p["shop"] = roll_shop_by_odds(p["level"])
+        for s in p["shop"]:
+            if s and s.get("name") == target and p.get("gold", 0) >= 1:
+                empty = next((i for i, x in enumerate(p["bench"]) if x is None), None)
+                if empty is not None and try_consume_pool(s.get("name", ""), 1):
+                    p["gold"] -= 1
+                    p["bench"][empty] = copy.deepcopy(s)
+        ai_try_combine(p)
+
+
+def _ai_try_chase_3star5(p, all_players=None):
+    """极限AI（噩梦/恭喜发财标记 _extreme_chase）主动追三星五费：
+    条件（目标五费已持≥5张/牌池+妮蔻足够/存活≤3/金币血量充足）齐备才启动；
+    场上已有人三星五费 → 选其他五费对抗；无路可追 → 返回False走正常运营止损。
+    普通排位AI无标记，完全不触发，保持校准好的段位梯度。"""
+    if not p.get("_extreme_chase"):
+        return False
+    if p.get("hp", 0) <= 15 or p.get("gold", 0) < 50:
+        p.pop("_chase_target", None)
+        return False
+    holdings = _five_holdings(p)
+    if not holdings:
+        return False
+    three = _someone_3star5(all_players, skip=p)
+    target = max((n for n, c in holdings.items()
+                  if n not in three and c >= 5), key=holdings.get, default=None)
+    if target is None:
+        # 自己的五费都不够接近，或全是别人已三星的 → 正常运营止损
+        p.pop("_chase_target", None)
+        return False
+    held = _hold_count(p, target)
+    remaining = pool_remaining(target)
+    neeko = sum(1 for it in p.get("items", [])
+                if isinstance(it, dict) and it.get("special_kind") == "mega_neeko")
+    potential = held + min(neeko, 3) + remaining
+    if potential < 9:
+        return False
+    alive = sum(1 for q in (all_players or [p]) if q.get("hp", 0) > 0)
+    if alive > 3 and p.get("gold", 0) < 80:
+        return False
+    p["_chase_target"] = target
+    _ai_chase_turn(p)
+    return True
+
+
+def _player_style_profile():
+    """从玩家历史对局统计画像：用于噩梦AI模仿+克制玩家运营。"""
+    hist = _load_player_history()
+    if len(hist) < 3:
+        return None
+    wins = sum(1 for h in hist if h.get("won"))
+    avg_level = sum(h.get("level", 1) for h in hist) / len(hist)
+    avg_stars = sum(h.get("stars", 0) for h in hist) / len(hist)
+    return {"win_rate": wins / len(hist), "avg_level": avg_level,
+            "avg_stars": avg_stars}
+
+
+def _apply_learned_style(ai):
+    """把玩家画像微调进噩梦AI参数：模仿运营倾向 + 轻度克制。"""
+    if not _LEARN_PLAYER_STYLE:
+        return
+    prof = _player_style_profile()
+    if not prof:
+        return
+    P = ai.get("_override_params")
+    if not isinstance(P, dict):
+        P = dict(EXTREME_AI_PARAMS)
+        ai["_override_params"] = P
+    if prof["avg_level"] >= 8:
+        P["w_level_up"] = P.get("w_level_up", 2) + 2
+        P["w_5cost"] = P.get("w_5cost", 2) + 1
+    if prof["avg_stars"] >= 14:
+        P["w_star2_pair"] = P.get("w_star2_pair", 120) + 20
+        P["w_trait_plan"] = P.get("w_trait_plan", 6) + 2
+    if prof["win_rate"] >= 0.6:
+        P["w_counter"] = P.get("w_counter", 4) + 3
 
 
 def ai_do_turn(p, all_players=None):
@@ -3607,6 +4041,12 @@ def ai_do_turn(p, all_players=None):
         if not p.get("shop_locked"):
             p["shop"] = roll_shop_by_odds(p["level"])
         ai_simple_buy(p)
+        ai_try_combine(p)
+        ai_auto_position(p)
+        return
+
+    # 极限AI（噩梦/恭喜发财）三星五费博弈：条件齐备主动追星，有人三星则对抗/止损
+    if _ai_try_chase_3star5(p, all_players):
         ai_try_combine(p)
         ai_auto_position(p)
         return
@@ -3659,7 +4099,7 @@ def ai_do_turn(p, all_players=None):
     refresh_budget -= int(P.get("w_hp_low", 0) * max(0, 40 - p["hp"]))
     refresh_budget = max(0, refresh_budget)
 
-    if p["gold"] >= refresh_budget:
+    if p["gold"] >= refresh_budget and p["gold"] >= REFRESH_COST:
         p["gold"] -= REFRESH_COST
         p["shop"] = roll_shop_by_odds(p["level"])
         ai_smart_buy(p)
@@ -3781,8 +4221,7 @@ def _save_training_progress():
         "snapshot_pool": EXTREME_AI_SNAPSHOT_POOL,
     }
     try:
-        with open(TRAINING_STATE_SAVE_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        _atomic_write_text(TRAINING_STATE_SAVE_FILE, json.dumps(data, ensure_ascii=False, indent=2))
         return True
     except Exception as e:
         log_once("save_training_progress", e)
@@ -3983,8 +4422,7 @@ def load_rank():
 
 def save_rank():
     try:
-        with open(_rank_save_path(), "w", encoding="utf-8") as f:
-            json.dump(RANK_STATE, f, ensure_ascii=False, indent=2)
+        _atomic_write_text(_rank_save_path(), json.dumps(RANK_STATE, ensure_ascii=False, indent=2))
         return True
     except Exception as e:
         log_once("save_rank", e)
@@ -4030,8 +4468,9 @@ def _settle_rank_match(gs, rank_mode):
     new_rank = rank_from_score(RANK_STATE["score"])
     RANK_STATE["rank"] = new_rank
     save_rank()
+    invasion = " · 噩梦AI入侵" if getattr(gs, "_nightmare_invasion", False) else ""
     settle = (f"排位结算: {'胜利' if won else '失败'} {pts:+d}分 · "
-              f"对手{opp_rank}AI · {old_rank} → {new_rank} · 总分 {RANK_STATE['score']}")
+              f"对手{opp_rank}AI{invasion} · {old_rank} → {new_rank} · 总分 {RANK_STATE['score']}")
     gs.rank_settle_text = settle
     gs.battle_log = settle
     gs.battle_log_history.append(settle)
@@ -4080,9 +4519,7 @@ def _save_ranked_ai(rank, params, score):
                 old = json.load(f)
         if old is not None and old.get("score", 0.0) >= score:
             return False
-        with open(fname, "w", encoding="utf-8") as f:
-            json.dump({"rank": rank, "score": score, "params": params},
-                      f, ensure_ascii=False, indent=2)
+        _atomic_write_text(fname, json.dumps({"rank": rank, "score": score, "params": params}, ensure_ascii=False, indent=2))
         return True
     except Exception as e:
         log_once("save_ranked_ai", e)
@@ -4228,8 +4665,7 @@ def _record_player_game(gs, mode):
         hist.append(record)
         if len(hist) > PLAYER_HISTORY_MAX:
             hist = hist[-PLAYER_HISTORY_MAX:]
-        with open(PLAYER_HISTORY_FILE, "w", encoding="utf-8") as f:
-            json.dump(hist, f, ensure_ascii=False, indent=2)
+        _atomic_write_text(PLAYER_HISTORY_FILE, json.dumps(hist, ensure_ascii=False, indent=2))
         return True
     except Exception as e:
         log_once("record_player_game", e)
@@ -4240,12 +4676,22 @@ def _load_player_history():
     try:
         if not os.path.exists(PLAYER_HISTORY_FILE):
             return []
-        with open(PLAYER_HISTORY_FILE, "r", encoding="utf-8") as f:
-            hist = json.load(f)
+        with open(PLAYER_HISTORY_FILE, "r", encoding="utf-8") as f:            hist = json.load(f)
         return hist if isinstance(hist, list) else []
     except Exception as e:
         log_once("load_player_history", e)
         return []
+
+
+def _clear_player_history():
+    """一键清空玩家学习样本：删除 player_history.json，AI 遗忘玩家打法。"""
+    try:
+        if os.path.exists(PLAYER_HISTORY_FILE):
+            os.remove(PLAYER_HISTORY_FILE)
+        return True
+    except Exception as e:
+        log_once("clear_player_history", e)
+        return False
 
 
 def _make_player_data_opponent():
@@ -4304,9 +4750,96 @@ def _sim_bounty_round(p):
     p["_bounty_layer"] = layer
 
 
+def _sanitize_sim_item(it):
+    if not isinstance(it, dict):
+        return None
+    stats = it.get("stats")
+    if not isinstance(stats, dict):
+        stats = {}
+    clean_stats = {}
+    for k, v in stats.items():
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(float(v)):
+            clean_stats[k] = v
+    it["stats"] = clean_stats
+    return it
+
+
+def _sanitize_sim_player(p):
+    """无渲染模拟器入口清洗脏状态；训练/Fuzz不得因None或非法容器直接崩溃。"""
+    if not isinstance(p, dict):
+        p = create_empty_player(gold=0, is_ai=True)
+    numeric_defaults = {
+        "gold": 0, "hp": 100, "level": 1, "xp": 0,
+        "xp_next": XP_TABLE.get(1, 2) if isinstance(XP_TABLE, dict) else 2,
+        "win_streak": 0, "lose_streak": 0, "difficulty_mult": 1.0,
+    }
+    for k, default in numeric_defaults.items():
+        v = p.get(k, default)
+        if not isinstance(v, (int, float)) or isinstance(v, bool) or not math.isfinite(float(v)):
+            v = default
+        if k in ("gold", "hp", "level", "xp", "xp_next", "win_streak", "lose_streak"):
+            v = int(v)
+        p[k] = v
+    p["gold"] = max(0, p["gold"])
+    p["hp"] = max(0, min(1000, p["hp"]))
+    p["level"] = max(1, min(MAX_LEVEL, p["level"]))
+    for key in ("board",):
+        board = p.get(key)
+        if not isinstance(board, list):
+            board = []
+        board2 = []
+        for r in range(4):
+            row = board[r] if r < len(board) and isinstance(board[r], list) else []
+            row2 = []
+            for c in range(7):
+                u = row[c] if c < len(row) else None
+                if isinstance(u, dict):
+                    u = safe_unit(u)
+                    if u and not get_base_template(u.get("name", "")):
+                        u = None
+                    if u:
+                        u["items"] = [x for x in (_sanitize_sim_item(it) for it in u.get("items", [])) if x is not None]
+                        sync_unit_traits_from_items(u)
+                else:
+                    u = None
+                row2.append(u)
+            board2.append(row2)
+        p["board"] = board2
+    bench = p.get("bench")
+    if not isinstance(bench, list):
+        bench = []
+    bench2 = []
+    for i in range(8):
+        u = bench[i] if i < len(bench) else None
+        if isinstance(u, dict):
+            u = safe_unit(u)
+            if u and not get_base_template(u.get("name", "")):
+                u = None
+            if u:
+                u["items"] = [x for x in (_sanitize_sim_item(it) for it in u.get("items", [])) if x is not None]
+                sync_unit_traits_from_items(u)
+        else:
+            u = None
+        bench2.append(u)
+    p["bench"] = bench2
+    if not isinstance(p.get("items"), list):
+        p["items"] = []
+    p["items"] = [x for x in (_sanitize_sim_item(it) for it in p["items"]) if x is not None]
+    return p
+
+
 def _sim_run_one_game(players, max_rounds=35):
-    """无渲染跑一局；返回按排名（高到低）排列的玩家列表。"""
-    init_pool()
+    """无渲染跑一局；使用线程本地独立卡池，不污染真实对局。"""
+    old_pool = getattr(_SIM_POOL_LOCAL, "pool", None)
+    _SIM_POOL_LOCAL.pool = _make_pool_snapshot()
+    players = [_sanitize_sim_player(p) for p in (players or [])]
+    try:
+        return _sim_run_one_game_inner(players, max_rounds)
+    finally:
+        _SIM_POOL_LOCAL.pool = old_pool
+
+
+def _sim_run_one_game_inner(players, max_rounds=35):
     stage, rnd = 1, 2
     while max_rounds > 0:
         alive = [p for p in players if p["hp"] > 0]
@@ -4318,8 +4851,8 @@ def _sim_run_one_game(players, max_rounds=35):
                 continue
             try:
                 ai_do_turn(p, players)
-            except Exception:
-                pass
+            except Exception as e:
+                raise RuntimeError(f"AI模拟候选异常: {p.get('name', '?')}") from e
         # 战力配对
         alive = [p for p in players if p["hp"] > 0]
         random.shuffle(alive)
@@ -4368,47 +4901,40 @@ def _sim_run_one_game(players, max_rounds=35):
 
 
 def _sim_evaluate_params(params, games=10):
-    """按当前课程阶段挑对手评估极限 AI：
-    阶段1=打普通AI；阶段2=打困难AI；阶段3=打基础对手+快照池。
-    返回 (平均分, 胜率)。"""
-    global EXTREME_AI_PARAMS
-    saved = dict(EXTREME_AI_PARAMS)
-    EXTREME_AI_PARAMS = dict(params)
+    """评估候选AI参数；候选参数只挂在候选玩家上，不修改全局。"""
     total_score = 0.0
     wins = 0
     phase = _TRAINING_STATE.get("phase", 1)
-    try:
-        for _ in range(games):
-            players = []
-            for i in range(8):
-                if i == 0:
-                    p = create_empty_player(gold=0, is_ai=True,
-                                             difficulty_mult=1.6)  # 极限
-                else:
-                    p = _make_curriculum_opponent(phase)
-                one_cost = [c for c in CHAMPION_LIST
-                            if c["cost"] == 1 and not c.get("no_shop")]
-                if one_cost:
-                    c = random.choice(one_cost)
-                    u = make_unit_with_star(c["name"], 1)
-                    if u:
-                        p["bench"][0] = u
-                players.append(p)
+    for _ in range(games):
+        players = []
+        for i in range(8):
+            if i == 0:
+                p = create_empty_player(gold=0, is_ai=True, difficulty_mult=1.6)
+                p["_override_params"] = dict(params)
+            else:
+                p = _make_curriculum_opponent(phase)
+            one_cost = [c for c in CHAMPION_LIST if c["cost"] == 1 and not c.get("no_shop")]
+            if one_cost:
+                c = random.choice(one_cost)
+                u = make_unit_with_star(c["name"], 1)
+                if u:
+                    p["bench"][0] = u
+            players.append(p)
+        try:
             ranked = _sim_run_one_game(players)
-            rank_idx = ranked.index(players[0])
-            if rank_idx == 0:
-                wins += 1
-                total_score += 100
-            elif rank_idx == 1:
-                total_score += 60
-            elif rank_idx == 2:
-                total_score += 30
-            elif rank_idx == 3:
-                total_score += 10
-            # 额外按极限 AI 的最终血量加分
-            total_score += max(0, players[0]["hp"]) * 0.5
-    finally:
-        EXTREME_AI_PARAMS = saved
+        except Exception:
+            return -1e9, 0.0
+        rank_idx = ranked.index(players[0])
+        if rank_idx == 0:
+            wins += 1
+            total_score += 100
+        elif rank_idx == 1:
+            total_score += 60
+        elif rank_idx == 2:
+            total_score += 30
+        elif rank_idx == 3:
+            total_score += 10
+        total_score += max(0, players[0]["hp"]) * 0.5
     return total_score / max(1, games), wins / max(1, games)
 
 
@@ -4595,7 +5121,8 @@ def evolve_extreme_ai_offline(population=12, games_per_variant=6,
         gen = int(prog.get("generation", 0))
         best_score = float(prog.get("best_score", 0.0))
         best_params = dict(base)
-        EXTREME_AI_PARAMS = dict(best_params)
+        with _AI_PARAMS_LOCK:
+            EXTREME_AI_PARAMS = dict(best_params)
         st["phase"] = int(prog.get("phase", 1))
         st["phase_label"] = prog.get("phase_label", "普通")
         st["no_breakthrough_gens"] = int(prog.get("no_breakthrough_gens", 0))
@@ -4681,7 +5208,8 @@ def evolve_extreme_ai_offline(population=12, games_per_variant=6,
         if breakthrough:
             best_score = gen_best
             best_params = dict(gen_best_params)
-            EXTREME_AI_PARAMS = dict(best_params)
+            with _AI_PARAMS_LOCK:
+                EXTREME_AI_PARAMS = dict(best_params)
             save_extreme_params()
             # 自动固化：把新的全局最优AI直接写进豹药宇宙.py源码（带.bak备份），
             # 复制脚本到别的电脑无需带json也能用这个最强AI
@@ -4861,12 +5389,14 @@ class BattleUnit:
         true_extra = 0
         if source is not None and hasattr(source, "true_dmg_bonus"):
             true_extra = int(dmg * source.true_dmg_bonus)
-        if dmg_type == "magic":
+        if dmg_type == "true":
+            reduction = 0.0
+        elif dmg_type == "magic":
             reduction = self.mr / (self.mr + 100) if self.mr >= 0 else 0
         else:
             reduction = self.armor / (self.armor + 100) if self.armor >= 0 else 0
         final = max(1, int(dmg * (1 - reduction))) + true_extra
-        if self.damage_reduction > 0:
+        if self.damage_reduction != 0:
             final = max(1, int(final * (1 - self.damage_reduction)))
         absorbed = 0
         shield_before = self.shield
@@ -5714,6 +6244,9 @@ class GameState:
         self._wait_peer_start = 0.0
         self._toast = None
         self._toast_timer = 0.0
+        self._congrats_mode = False
+        self._congrats_neeko_given = False
+        self._congrats_50hp_given = False
 
         ai_mult = DIFFICULTY_MULT.get(difficulty, 1.0)
         self.me = create_empty_player(gold=START_GOLD_PLAYER, is_ai=False)
@@ -5844,8 +6377,10 @@ class GameState:
             # opponent consumed the last copy meanwhile, fall back to an
             # actually available one-cost champion instead of creating a copy.
             if not try_consume_pool(champ["name"], 1):
+                # 若被对手抢光，回退到同费用的可用英雄（恭喜发财下为5费，普通模式仍为1费）
+                c_cost = champ.get("cost", 1)
                 available = [c for c in CHAMPION_LIST
-                             if c.get("cost") == 1 and not c.get("no_shop")
+                             if c.get("cost") == c_cost and not c.get("no_shop")
                              and pool_remaining(c["name"]) > 0]
                 champ = random.choice(available) if available else None
                 if champ is not None and not try_consume_pool(champ["name"], 1):
@@ -6191,6 +6726,7 @@ class GameState:
             self.me["items"].append(make_special_item("disassembler"))
             removed = list(target.get("items", []))
             target["items"] = []
+            sync_unit_traits_from_items(target)
             for it in removed:
                 if len(self.me["items"]) < MAX_ITEM_BENCH:
                     self.me["items"].append(it)
@@ -6214,6 +6750,7 @@ class GameState:
             old_items = list(target["items"])
             target["items"] = []
             target["items"] = [_reroll_item(it) for it in old_items]
+            sync_unit_traits_from_items(target)
             self.me["items"].pop(idx)
             self.battle_log = (f"昊天锤：重铸 {champ_cn(target['name'])} "
                                f"身上全部 {len(old_items)} 件装备")
@@ -6624,6 +7161,32 @@ class GameState:
         self.multiplayer_phase = "wait_battle"
         self.battle_log = "等待对手数据..."
 
+    def _sanitize_network_board(self, board):
+        empty = [[None] * 7 for _ in range(4)]
+        if not isinstance(board, list) or len(board) != 4:
+            return empty
+        out = []
+        for row in board:
+            if not isinstance(row, list) or len(row) != 7:
+                return empty
+            clean_row = []
+            for u in row:
+                if u is None:
+                    clean_row.append(None)
+                    continue
+                if not isinstance(u, dict):
+                    clean_row.append(None)
+                    continue
+                u = safe_unit(u)
+                if not get_base_template(u.get("name", "")):
+                    clean_row.append(None)
+                    continue
+                u["items"] = [x for x in (_sanitize_sim_item(it) for it in u.get("items", [])) if x is not None]
+                sync_unit_traits_from_items(u)
+                clean_row.append(u)
+            out.append(clean_row)
+        return out
+
     def _setup_multiplayer_battle(self, peer_msg):
         try:
             peer_seed = int(peer_msg.get("seed", 0))
@@ -6639,7 +7202,7 @@ class GameState:
         peer = create_empty_player(gold=0, is_ai=True)
         # 防御对手畸形/伪造数据：类型不符时回退默认值，避免崩溃
         board = peer_msg.get("board", empty_board)
-        peer["board"] = board if isinstance(board, list) and len(board) == 4 else empty_board
+        peer["board"] = self._sanitize_network_board(board)
         hb = peer_msg.get("hex_bonuses", default_bonuses)
         peer["hex_bonuses"] = hb if isinstance(hb, dict) else default_bonuses
         hl = peer_msg.get("hex_list", [])
@@ -7105,17 +7668,22 @@ class GameState:
                and self.bounty_layer_current < max_layer):
             self.bounty_shards -= 10
             self.bounty_layer_current += 1
-            self.bounty_layer_options = [roll_bounty_reward(self.bounty_layer_current)]
+            if self.bounty_layer_current == 9:
+                opts = _bounty_reward_options(9)
+                self.bounty_layer_options = [copy.deepcopy(x) for x in random.sample(opts, min(3, len(opts)))]
+            else:
+                self.bounty_layer_options = [roll_bounty_reward(self.bounty_layer_current)]
             self.show_bounty_popup = True
             self.battle_log = (
                 f"收菜系统：到达第 {self.bounty_layer_current} 层！")
             play_sfx("hex")
             break
 
-    def _claim_bounty(self):
+    def _claim_bounty(self, choice_index=0):
         layer = self.bounty_layer_current
         if self.bounty_layer_options:
-            reward = self.bounty_layer_options[0]
+            choice_index = max(0, min(int(choice_index), len(self.bounty_layer_options) - 1))
+            reward = self.bounty_layer_options[choice_index]
         else:
             reward = roll_bounty_reward(layer)
         apply_bounty_reward(self, reward)
@@ -7226,6 +7794,9 @@ class GameState:
             self.hex_choices = roll_hex_choices()
             if len(self.hex_choices) > 0:
                 self.show_hex_popup = True
+        if getattr(self, "_congrats_mode", False):
+            # 恭喜发财保底：阶段6结束存活单位100%大妮蔻 + 血量首次≤50大妮蔻
+            _congrats_round_checks(self)
         save_game(self)
 
 
@@ -8337,23 +8908,32 @@ def draw_bounty_popup(screen, gs, font_lg, font_md, font_sm, W, H, mouse_pos):
               get_font(40), TREASURE_COLOR, True)
     draw_text(screen, f"到达第 {layer} 层 (上限 {max_layer} 层)",
               W // 2, H * 0.24, font_lg, GOLD_COLOR, True)
-    reward = None
-    if gs.bounty_layer_options:
-        reward = gs.bounty_layer_options[0]
-    if reward is None:
-        reward = roll_bounty_reward(layer)
-    card_w = W * 0.70
+    options = gs.bounty_layer_options or [roll_bounty_reward(layer)]
+    card_rects = []
+    n = len(options) if layer == 9 else 1
+    card_w = W * (0.28 if n == 3 else 0.70)
     card_h = H * 0.18
-    card_x = W // 2 - card_w // 2
+    gap = W * 0.025
+    total_w = n * card_w + (n - 1) * gap
+    start_x = W / 2 - total_w / 2
     card_y = H * 0.33
-    r = pygame.Rect(int(card_x), int(card_y), int(card_w), int(card_h))
-    draw_panel(screen, r, (40, 34, 20), TREASURE_COLOR, 12, 3)
-    draw_text(screen, f"【{reward.get('name', '?')}】",
-              r.centerx, r.y + 24, get_font(28), GOLD_COLOR, True)
-    draw_text(screen, reward.get("desc", ""),
-              r.centerx, r.y + 66, font_md, TEXT_WHITE, True)
-    draw_text(screen, "收宝离场：获得奖励，层数与碎片归零",
-              r.centerx, r.y + 105, font_sm, TEXT_DIM, True)
+    for i, reward in enumerate(options[:n]):
+        x = start_x + i * (card_w + gap)
+        r = pygame.Rect(int(x), int(card_y), int(card_w), int(card_h))
+        card_rects.append(r)
+        draw_panel(screen, r, (40, 34, 20), TREASURE_COLOR, 12, 3)
+        draw_text(screen, f"【{reward.get('name', '?')}】",
+                  r.centerx, r.y + 24, get_font(24 if n == 3 else 28), GOLD_COLOR, True)
+        draw_text(screen, reward.get("desc", ""),
+                  r.centerx, r.y + 66, font_sm if n == 3 else font_md, TEXT_WHITE, True)
+        if n == 3:
+            draw_text(screen, f"选择 {i + 1}", r.centerx, r.y + 130, font_sm, GOLD_COLOR, True)
+    gs._bounty_choice_rects = card_rects
+    if n == 3:
+        draw_text(screen, "第9层终极掠夺：三选一", W // 2, H * 0.58, font_md, GOLD_COLOR, True)
+    else:
+        draw_text(screen, "收宝离场：获得奖励，层数与碎片归零",
+                  W // 2, H * 0.54, font_sm, TEXT_DIM, True)
     draw_text(screen, "深入寻宝：继续叠层，下回合再战",
               r.centerx, r.y + 130, font_sm, TEXT_DIM, True)
     can_continue = layer < max_layer
@@ -10002,38 +10582,126 @@ def draw_game(screen, gs, font_lg, font_md, font_sm, font_dmg, W, H, mouse_pos):
             ga_btn, hover_item_idx, path_btn, go_restart, go_menu)
 
 
+def _draw_menu_icon(surface, x, y, kind, color, size=16):
+    """主菜单按钮左侧小图标（纯图形绘制，不依赖字体符号支持）。"""
+    cx, cy = x + size // 2, y + size // 2
+    h = size // 2
+    try:
+        if kind in ("play", "continue"):
+            pts = [(cx - h // 2, cy - h), (cx + h, cy), (cx - h // 2, cy + h)]
+            pygame.draw.polygon(surface, color, pts)
+        elif kind == "net":
+            pygame.draw.circle(surface, color, (cx - h // 2, cy), h // 2)
+            pygame.draw.circle(surface, color, (cx + h // 2, cy), h // 2)
+            pygame.draw.line(surface, color, (cx - 2, cy), (cx + 2, cy), 2)
+        elif kind == "rank":
+            pts = [(cx, cy - h), (cx + h, cy), (cx, cy + h), (cx - h, cy)]
+            pygame.draw.polygon(surface, color, pts)
+        elif kind == "challenge":
+            pygame.draw.line(surface, color, (cx - h // 2, cy - h),
+                             (cx + h // 2, cy + h), 3)
+            pygame.draw.line(surface, color, (cx + h // 2, cy - h),
+                             (cx - h // 2, cy + h), 3)
+        elif kind == "congrats":
+            pts = [(cx, cy - h), (cx + h, cy), (cx, cy + h), (cx - h, cy)]
+            pygame.draw.polygon(surface, color, pts)
+            pygame.draw.circle(surface, color, (cx, cy), h // 4)
+        elif kind == "update":
+            pygame.draw.circle(surface, color, (cx, cy), h // 2, 2)
+            pygame.draw.polygon(surface, color,
+                                [(cx + h // 2 + 2, cy - h + 2),
+                                 (cx + h // 2 - 2, cy - h + 4),
+                                 (cx + h // 2 - 4, cy - h + 8)])
+        elif kind == "train":
+            pts = [(cx - h, cy + h // 3), (cx, cy - h), (cx + h, cy + h // 3)]
+            pygame.draw.polygon(surface, color, pts)
+        elif kind == "gear":
+            # 简化齿轮：圆环 + 4个齿牙点 + 中心点
+            pygame.draw.circle(surface, color, (cx, cy), h // 2, 2)
+            for i in range(4):
+                ang = i * 1.5708
+                gx = cx + int((h // 2 + 3) * 0.5)
+                gy = cy + int((h // 2 + 3) * 0.5)
+                pygame.draw.circle(surface, color,
+                                   (cx + int((h // 2 + 2) * 0.9),
+                                    cy + int((h // 2 + 2) * 0.2)), 1)
+            pygame.draw.circle(surface, color, (cx, cy), h // 4)
+        elif kind == "quit":
+            pygame.draw.line(surface, color, (cx - h // 2, cy - h // 2),
+                             (cx + h // 2, cy + h // 2), 3)
+            pygame.draw.line(surface, color, (cx + h // 2, cy - h // 2),
+                             (cx - h // 2, cy + h // 2), 3)
+    except Exception:
+        pass
+
+
 def draw_menu_decoration(screen, font_sm, W, H):
     showcase = ["BaoLan", "BearBig", "ArcaneLord"]
     labels = ["毁灭豹", "守护熊", "秘法领主"]
     cx = W // 2
-    cy = H * 0.36
+    cy = H * 0.33
     r = int(min(W, H) * 0.075)
     gap = int(r * 2.6)
     for i, name in enumerate(showcase):
         x = cx + (i - 1) * gap
-        for k in range(3, 0, -1):
-            try:
-                glow_s = pygame.Surface((r * 2 + k * 8, r * 2 + k * 8),
-                                         pygame.SRCALPHA)
-                pygame.draw.circle(glow_s, (*GOLD_COLOR, 20),
-                                   (r + k * 4, r + k * 4), r + k * 4)
-                screen.blit(glow_s, (x - r - k * 4, cy - r - k * 4))
-            except Exception:
-                pass
         base = get_base_template(name)
         cost = base["cost"] if base else 5
         color = COST_COLORS.get(cost, TEXT_WHITE)
-        pygame.draw.circle(screen, COST_BG.get(cost, (40, 40, 50)), (x, cy), r)
+        bg = COST_BG.get(cost, (40, 40, 50))
+        # 双层光晕（金色 + 棋子色交替），提升质感
+        for k in range(4, 0, -1):
+            try:
+                glow_s = pygame.Surface((r * 2 + k * 10, r * 2 + k * 10),
+                                        pygame.SRCALPHA)
+                gc = GOLD_COLOR if k % 2 else color
+                pygame.draw.circle(glow_s, (*gc, 18),
+                                   (r + k * 5, r + k * 5), r + k * 5)
+                screen.blit(glow_s, (x - r - k * 5, cy - r - k * 5))
+            except Exception:
+                pass
+        # 圆底渐变
+        try:
+            circ = pygame.Surface((r * 2, r * 2), pygame.SRCALPHA)
+            for yy in range(r * 2):
+                t = yy / (r * 2)
+                c = (int(bg[0] + (color[0] - bg[0]) * t * 0.25),
+                     int(bg[1] + (color[1] - bg[1]) * t * 0.25),
+                     int(bg[2] + (color[2] - bg[2]) * t * 0.25), 255)
+                pygame.draw.circle(circ, c, (r, r), r)
+            screen.blit(circ, (x - r, cy - r))
+        except Exception:
+            pygame.draw.circle(screen, bg, (x, cy), r)
+        # 描边：外层亮色 + 内层深色双环
         pygame.draw.circle(screen, color, (x, cy), r, 3)
+        pygame.draw.circle(screen, (12, 14, 20), (x, cy), r - 5, 1)
         draw_text(screen, champ_cn(name)[:2], x, cy,
                   get_font(int(r * 0.85)), color, True)
-        draw_text(screen, labels[i], x, cy + r + 18,
-                  font_sm, TEXT_DIM, True)
+        # 标签：加小圆点装饰
+        tag_y = cy + r + 16
+        try:
+            lbl = get_font(16)
+            if lbl is not None:
+                w_l = lbl.size(labels[i])[0]
+                pygame.draw.circle(screen, color, (x - w_l // 2 - 9, tag_y + 8), 3)
+        except Exception:
+            pass
+        draw_text(screen, labels[i], x, tag_y, font_sm, TEXT_DIM, True)
 
 
 def draw_main_menu(screen, font_title, font_lg, font_md, font_sm,
-                    W, H, mouse_pos, difficulty):
+                   W, H, mouse_pos, difficulty):
     screen.fill((8, 10, 16))
+    # 背景：暖金渐变（顶部淡金 → 向下渐隐）
+    try:
+        grad = pygame.Surface((W, H), pygame.SRCALPHA)
+        for yy in range(0, H, 6):
+            t = yy / max(1, H)
+            a = int(42 * max(0.0, 1 - t * 2.2))
+            pygame.draw.rect(grad, (70, 34, 8, a), (0, yy, W, 6))
+        screen.blit(grad, (0, 0))
+    except Exception:
+        pass
+    # 星点
     try:
         for i in range(60):
             sx = (i * 7919) % W
@@ -10045,6 +10713,7 @@ def draw_main_menu(screen, font_title, font_lg, font_md, font_sm,
             screen.blit(s, (sx, sy))
     except Exception:
         pass
+    # 顶部光晕
     try:
         glow = pygame.Surface((W, 300), pygame.SRCALPHA)
         for i in range(100, 0, -10):
@@ -10054,7 +10723,8 @@ def draw_main_menu(screen, font_title, font_lg, font_md, font_sm,
         screen.blit(glow, (0, 0))
     except Exception:
         pass
-    title_y = H * 0.10
+    # 标题
+    title_y = H * 0.065
     title_text = "豹 药 宇 宙"
     try:
         shadow = font_title.render(title_text, True, (60, 30, 10))
@@ -10065,76 +10735,98 @@ def draw_main_menu(screen, font_title, font_lg, font_md, font_sm,
         screen.blit(render, rect)
     except Exception:
         draw_text(screen, title_text, W // 2, title_y, font_title, GOLD_COLOR, True)
-    draw_text(screen, "Leopard Potion AutoBattle Chess", W // 2, title_y + 40,
+    draw_text(screen, "Leopard Potion AutoBattle Chess", W // 2, title_y + 32,
               font_sm, TEXT_DIM, True)
+    # 顶部信息卡片（难度 + 排位）
+    info_r = pygame.Rect(int(W * 0.08), int(H * 0.14), int(W * 0.84), int(H * 0.05))
+    try:
+        draw_panel(screen, info_r, (20, 22, 30), (90, 78, 30), 12, 2)
+    except Exception:
+        pygame.draw.rect(screen, (20, 22, 30), info_r, border_radius=12)
     d_col = DIFFICULTY_COLOR.get(difficulty, TEXT_DIM)
     draw_text(screen,
-              f"当前AI难度: {DIFFICULTY_NAME.get(difficulty, '?')}  |  "
+              f"当前AI难度: {DIFFICULTY_NAME.get(difficulty, '?')}  ·  "
               f"排位: {RANK_STATE.get('rank', '青铜')} "
               f"{RANK_STATE.get('score', 0)}分"
               f"({RANK_STATE.get('wins', 0)}胜{RANK_STATE.get('losses', 0)}负)",
-              W // 2, title_y + 70, font_md, d_col, True)
+              W // 2, info_r.centery, font_md, d_col, True)
+    # 棋子装饰（三个五费圆形标识 + 双层光晕）
     draw_menu_decoration(screen, font_sm, W, H)
-    btn_w = W * 0.50
-    btn_h = 44
-    gap = 6
-    btn_x = W // 2 - btn_w // 2
-    if has_save():
-        group_h = 9 * btn_h + 8 * gap
-    else:
-        group_h = 8 * btn_h + 7 * gap
-    top = max(150, int(H * 0.5 - group_h / 2))
+    # 双列按钮网格：前8个按钮双列4行，退出跨列底部一行
+    btn_w = int(W * 0.42)
+    btn_h = 52
+    gap_x = int(W * 0.02)
+    gap_y = 12
+    col_x = [W // 2 - btn_w - gap_x // 2, W // 2 + gap_x // 2]
+    full_w = int(W * 0.86)
+    full_x = W // 2 - full_w // 2
+    grid_start = int(H * (0.44 if has_save() else 0.46))
+    y = grid_start
     continue_btn = None
     if has_save():
-        continue_btn = pygame.Rect(btn_x, top, btn_w, btn_h)
-        top += btn_h + gap
-    start_btn = pygame.Rect(btn_x, top, btn_w, btn_h)
-    top += btn_h + gap
-    multi_btn = pygame.Rect(btn_x, top, btn_w, btn_h)
-    top += btn_h + gap
-    rank_btn = pygame.Rect(btn_x, top, btn_w, btn_h)
-    top += btn_h + gap
-    challenge_btn = pygame.Rect(btn_x, top, btn_w, btn_h)
-    top += btn_h + gap
-    update_btn = pygame.Rect(btn_x, top, btn_w, btn_h)
-    top += btn_h + gap
-    train_btn = pygame.Rect(btn_x, top, btn_w, btn_h)
-    top += btn_h + gap
-    settings_btn = pygame.Rect(btn_x, top, btn_w, btn_h)
-    top += btn_h + gap
-    quit_btn = pygame.Rect(btn_x, top, btn_w, btn_h)
-    btn_list = []
-    if continue_btn is not None:
-        btn_list.append((continue_btn, "继续游戏", (30, 60, 40), (45, 90, 60), GREEN_HP))
-    btn_list += [
-        (start_btn, "开始游戏", (55, 45, 15), (95, 78, 25), GOLD_COLOR),
-        (multi_btn, "联机对战", (30, 55, 45), (45, 80, 65), GREEN_HP),
-        (rank_btn, "排位赛", (70, 45, 15), (120, 80, 25), GOLD_COLOR),
-        (challenge_btn, "挑战最强AI", (60, 30, 60), (95, 50, 100), (200, 60, 230)),
-        (update_btn, "检测更新", (35, 45, 70), (50, 65, 100), RUNE_COLOR),
-        (train_btn, "训练极限AI", (50, 40, 70), (75, 55, 110), PURPLE),
-        (settings_btn, "设置", (30, 40, 60), (45, 60, 90), BLUE),
-        (quit_btn, "退出", (50, 25, 25), (75, 40, 40), RED),
+        continue_btn = pygame.Rect(full_x, y, full_w, btn_h)
+        y += btn_h + gap_y
+    # 双列前8个：开始/联机/排位/挑战/恭喜发财/检测/训练/设置
+    grid_specs = [
+        ("play", "开始游戏", (55, 45, 15), (95, 78, 25), GOLD_COLOR, GOLD_COLOR),
+        ("net", "联机对战", (30, 55, 45), (45, 80, 65), GREEN_HP, GREEN_HP),
+        ("rank", "排位赛", (70, 45, 15), (120, 80, 25), GOLD_COLOR, GOLD_COLOR),
+        ("challenge", "挑战最强AI", (60, 30, 60), (95, 50, 100), (200, 60, 230), (200, 60, 230)),
+        ("congrats", "恭喜发财", (90, 30, 25), (140, 50, 40), (255, 120, 60), (255, 190, 90)),
+        ("update", "检测更新", (35, 45, 70), (50, 65, 100), RUNE_COLOR, TEXT_WHITE),
+        ("train", "训练极限AI", (50, 40, 70), (75, 55, 110), PURPLE, TEXT_WHITE),
+        ("gear", "设置", (30, 40, 60), (45, 60, 90), BLUE, TEXT_WHITE),
     ]
-    for btn, label, base_col, hover_col, border in btn_list:
-        hovered = btn.collidepoint(mouse_pos)
-        draw_button(screen, btn, hover_col if hovered else base_col, border, 12)
-        if label in ("开始游戏", "排位赛"):
-            label_col = GOLD_COLOR
-        elif label in ("联机对战", "继续游戏"):
-            label_col = GREEN_HP
-        elif label == "挑战最强AI":
-            label_col = (200, 60, 230)
-        else:
-            label_col = TEXT_WHITE
-        draw_text(screen, label, btn.centerx, btn.centery,
-                  get_font(28), label_col, True)
-    draw_text(screen, "v1.3.3  ·  Built with Pygame  ·  支持联机对战",
-              W // 2, H - 22, font_sm, (100, 105, 115), True)
-    draw_text(screen, f"调试: {DBG_LAST}", W // 2, H - 8, font_sm,
+    btn_rects = []
+    for idx, (icon, label, base_c, hover_c, border_c, label_c) in enumerate(grid_specs):
+        row, col = divmod(idx, 2)
+        r = pygame.Rect(col_x[col], y + row * (btn_h + gap_y), btn_w, btn_h)
+        btn_rects.append((r, icon, label, base_c, hover_c, border_c, label_c))
+    # 退出：跨列底部一行
+    quit_btn = pygame.Rect(full_x, y + 4 * (btn_h + gap_y), full_w, btn_h)
+    for r, icon, label, base_c, hover_c, border_c, label_c in btn_rects:
+        hovered = r.collidepoint(mouse_pos)
+        if hovered:
+            try:
+                glow_r = r.inflate(12, 12)
+                gs_ = pygame.Surface(glow_r.size, pygame.SRCALPHA)
+                pygame.draw.rect(gs_, (*border_c, 45), gs_.get_rect(), border_radius=14)
+                screen.blit(gs_, glow_r.topleft)
+            except Exception:
+                pass
+        draw_button(screen, r, hover_c if hovered else base_c, border_c, 12)
+        try:
+            _draw_menu_icon(screen, r.x + 14, r.centery - 8, icon, label_c, 16)
+        except Exception:
+            pass
+        draw_text(screen, label, r.centerx + 6, r.centery,
+                  get_font(28), label_c, True)
+    hovered_q = quit_btn.collidepoint(mouse_pos)
+    if hovered_q:
+        try:
+            glow_r = quit_btn.inflate(12, 12)
+            gs_ = pygame.Surface(glow_r.size, pygame.SRCALPHA)
+            pygame.draw.rect(gs_, (*RED, 45), gs_.get_rect(), border_radius=14)
+            screen.blit(gs_, glow_r.topleft)
+        except Exception:
+            pass
+    draw_button(screen, quit_btn, (75, 40, 40) if hovered_q else (50, 25, 25),
+                RED, 12)
+    try:
+        _draw_menu_icon(screen, quit_btn.x + 14, quit_btn.centery - 8, "quit",
+                        (255, 140, 140), 16)
+    except Exception:
+        pass
+    draw_text(screen, "退出", quit_btn.centerx + 6, quit_btn.centery,
+              get_font(28), (255, 160, 160), True)
+    draw_text(screen, f"v{CURRENT_VERSION}  ·  Built with Pygame  ·  支持联机对战",
+              W // 2, H - 24, font_sm, (100, 105, 115), True)
+    draw_text(screen, f"调试: {DBG_LAST}", W // 2, H - 9, font_sm,
               (200, 60, 60), align_center=True)
-    return (continue_btn, start_btn, multi_btn, rank_btn, challenge_btn,
-            update_btn, train_btn, settings_btn, quit_btn)
+    return (continue_btn,
+            btn_rects[0][0], btn_rects[1][0], btn_rects[2][0], btn_rects[3][0],
+            btn_rects[4][0], btn_rects[5][0], btn_rects[6][0], btn_rects[7][0],
+            quit_btn)
 
 
 def draw_rank_page(screen, font_title, font_lg, font_md, font_sm,
@@ -10216,6 +10908,8 @@ def draw_rank_page(screen, font_title, font_lg, font_md, font_sm,
         "钻石700 / 大师1000 / 宗师1400 / 王者1900",
         "内置青铜→王者全套段位AI：下载即用，无需训练",
         "本地离线训练出的AI会自动覆盖对应段位",
+        "⚠ 登顶王者后：噩梦AI入侵排位，7名对手全部为当前最强AI",
+        "  击败入侵噩梦AI照常冲分，AI随训练突破自动升级",
     ]
     for i, line in enumerate(rules):
         draw_text(screen, line, W // 2, rules_y + 28 + i * 24,
@@ -10237,7 +10931,7 @@ def draw_rank_page(screen, font_title, font_lg, font_md, font_sm,
                 (60, 62, 74) if hover_b else (45, 47, 58), TEXT_DIM, 12)
     draw_text(screen, "返回主菜单", back_btn.centerx, back_btn.centery,
               get_font(26), TEXT_WHITE, True)
-    draw_text(screen, "v1.3.3  ·  排位赛·内置段位池", W // 2, H - 16, font_sm,
+    draw_text(screen, "v1.4.2  ·  审计缺陷修复版", W // 2, H - 16, font_sm,
               (100, 105, 115), True)
     return start_btn, back_btn
 
@@ -10287,21 +10981,39 @@ def draw_settings_menu(screen, font_title, font_lg, font_md, font_sm,
             draw_text(screen, "✓", r.right - 40, r.centery,
                       get_font(32), col, True)
         diff_rects.append((r, d))
-    changelog_btn = pygame.Rect(W // 2 - W * 0.22, H * 0.72, W * 0.44, 52)
+    changelog_btn = pygame.Rect(W // 2 - W * 0.22, H * 0.68, W * 0.44, 48)
     hovered_cl = changelog_btn.collidepoint(mouse_pos)
     draw_button(screen, changelog_btn,
                 (95, 80, 30) if hovered_cl else (55, 45, 15),
                 GOLD_COLOR, 10)
     draw_text(screen, "查看更新日志", changelog_btn.centerx,
               changelog_btn.centery, font_md, GOLD_COLOR, True)
-    back_btn = pygame.Rect(W // 2 - W * 0.22, H * 0.82, W * 0.44, 60)
+    learn_btn = pygame.Rect(W // 2 - W * 0.34, H * 0.76, W * 0.68, 46)
+    hovered_l = learn_btn.collidepoint(mouse_pos)
+    learn_on = _LEARN_PLAYER_STYLE
+    draw_button(screen, learn_btn,
+                (45, 80, 45) if hovered_l else (30, 55, 30),
+                (70, 200, 90) if learn_on else (130, 130, 140), 10)
+    draw_text(screen,
+              ("✓ 噩梦AI学习玩家运营: 开启" if learn_on
+               else "✗ 噩梦AI学习玩家运营: 关闭"),
+              learn_btn.centerx, learn_btn.centery, font_md,
+              (180, 255, 190) if learn_on else TEXT_DIM, True)
+    clear_btn = pygame.Rect(W // 2 - W * 0.34, H * 0.84, W * 0.68, 46)
+    hovered_c = clear_btn.collidepoint(mouse_pos)
+    draw_button(screen, clear_btn,
+                (120, 50, 40) if hovered_c else (80, 35, 28),
+                (255, 120, 100), 10)
+    draw_text(screen, "清空玩家学习样本（AI遗忘你的打法）",
+              clear_btn.centerx, clear_btn.centery, font_md, (255, 200, 190), True)
+    back_btn = pygame.Rect(W // 2 - W * 0.22, H * 0.92, W * 0.44, 54)
     hovered_back = back_btn.collidepoint(mouse_pos)
     draw_button(screen, back_btn,
                 (45, 60, 90) if hovered_back else (30, 40, 60),
                 BLUE, 10)
     draw_text(screen, "返回主菜单", back_btn.centerx, back_btn.centery,
               font_lg, TEXT_WHITE, True)
-    return diff_rects, back_btn, changelog_btn
+    return diff_rects, back_btn, changelog_btn, learn_btn, clear_btn
 
 
 def draw_challenge_page(screen, font_title, font_lg, font_md, font_sm,
@@ -10362,6 +11074,68 @@ def draw_challenge_page(screen, font_title, font_lg, font_md, font_sm,
     draw_text(screen, "开始挑战", start_btn.centerx, start_btn.centery,
               font_lg, (230, 190, 255), True)
     back_btn = pygame.Rect(W // 2 - W * 0.22, H * 0.82, W * 0.44, 60)
+    hovered_back = back_btn.collidepoint(mouse_pos)
+    draw_button(screen, back_btn,
+                (45, 60, 90) if hovered_back else (30, 40, 60),
+                BLUE, 10)
+    draw_text(screen, "返回主菜单", back_btn.centerx, back_btn.centery,
+              font_lg, TEXT_WHITE, True)
+    return start_btn, back_btn
+
+
+def draw_congrats_page(screen, font_title, font_lg, font_md, font_sm,
+                       W, H, mouse_pos):
+    """恭喜发财专属页面：五费开局 + 大妮蔻狂欢 + 全员噩梦最强AI。"""
+    screen.fill((8, 10, 16))
+    try:
+        for i in range(60):
+            sx = (i * 7919) % W
+            sy = (i * 6133) % H
+            rr = 1 + (i % 3)
+            alpha = 80 + (i * 13) % 120
+            s = pygame.Surface((rr * 2, rr * 2), pygame.SRCALPHA)
+            s.fill((255, 255, 255, alpha))
+            screen.blit(s, (sx, sy))
+    except Exception:
+        pass
+    try:
+        glow = pygame.Surface((W, 300), pygame.SRCALPHA)
+        for i in range(100, 0, -10):
+            a = int(15 * (100 - i) / 100)
+            pygame.draw.ellipse(glow, (*GOLD_DEEP, a),
+                                (W // 2 - i * 4, 130 - i, i * 8, i * 3))
+        screen.blit(glow, (0, 0))
+    except Exception:
+        pass
+
+    draw_text(screen, "恭喜发财", W // 2, H * 0.07, font_title,
+              (255, 190, 90), True)
+    draw_text(screen, "Congrats Fortune · 五费开局 · 大妮蔻狂欢",
+              W // 2, H * 0.07 + 34, font_sm, TEXT_DIM, True)
+
+    rules = [
+        "· 开局选秀3个候选全部为5费棋子，你自选1张（对手各随机1张5费）",
+        "· 7名对手全部为当前最强AI（噩梦强度）",
+        "· 大妮蔻获取途径扩充：财宝高层/野怪法球/血量跌破50/海克斯",
+        "· 阶段6结束：存活单位100%获得1张大妮蔻",
+        "· AI会主动追三星五费，有人三星时AI会追别的五费对抗",
+        "· 节奏更快、资源更丰富，体验顶级爽局",
+    ]
+    y = H * 0.22
+    for line in rules:
+        draw_text(screen, line, W // 2, y, font_md, TEXT_WHITE, True)
+        y += 34
+    draw_text(screen, "仅此模式生效，排位/普通/噩梦完全不受影响",
+              W // 2, y + 8, font_sm, (255, 170, 60), True)
+
+    start_btn = pygame.Rect(W // 2 - W * 0.28, H * 0.78, W * 0.56, 68)
+    hovered_st = start_btn.collidepoint(mouse_pos)
+    draw_button(screen, start_btn,
+                (150, 60, 30) if hovered_st else (100, 40, 20),
+                (255, 140, 60), 12)
+    draw_text(screen, "开始恭喜发财", start_btn.centerx, start_btn.centery,
+              font_lg, (255, 220, 160), True)
+    back_btn = pygame.Rect(W // 2 - W * 0.22, H * 0.90, W * 0.44, 56)
     hovered_back = back_btn.collidepoint(mouse_pos)
     draw_button(screen, back_btn,
                 (45, 60, 90) if hovered_back else (30, 40, 60),
@@ -10700,27 +11474,67 @@ def _apply_nightmare_ai(gs):
     for ai in gs.players:
         ai["difficulty_mult"] = mult
         ai["_override_params"] = dict(ai_params)
+        ai["_extreme_chase"] = True   # 噩梦AI开启三星五费博弈标记
+        _apply_learned_style(ai)      # 学习玩家运营（开关受 _LEARN_PLAYER_STYLE 控制）
     gs.battle_log = "噩梦模式 · 7名对手均为当前最强AI · 击败它们证明你的实力！"
+
+
+def _apply_congrats_mode(gs):
+    """恭喜发财：全员噩梦最强AI + 开局五费 + 大妮蔻狂欢（阶段6保底/50血保底）。
+    开局选秀3个候选全部为5费；玩家自选1张，AI各随机1张，保证开局公平。"""
+    _apply_nightmare_ai(gs)
+    gs._congrats_mode = True
+    gs._congrats_neeko_given = False
+    gs._congrats_50hp_given = False
+    # AI：清掉开局1费（还给卡池），换成随机五费
+    for ai in gs.players:
+        for i, u in enumerate(ai["bench"]):
+            if u is not None:
+                return_pool(u.get("name", ""), 1)
+                ai["bench"][i] = None
+        _give_congrats_start_unit(ai)
+    # 玩家：开局选秀3个候选改为5费（玩家自选1张；不额外发随机五费，保证与AI公平）
+    five = _congrats_five_cost_list()
+    avail = [c for c in five if pool_remaining(c["name"]) > 0]
+    if len(avail) < 3:
+        avail = five
+    gs.starter_choices = random.sample(avail, min(3, len(avail)))
+    gs.battle_log = "恭喜发财 · 五费开局（选秀3选1） · 全员噩梦最强AI · 大妮蔻狂欢！"
 
 
 def run_game_session(screen, clock, difficulty, font_lg, font_md, font_sm,
                      font_dmg, net=None, is_host=False, load_save=False,
-                     rank_mode=None):
+                     rank_mode=None, congrats_mode=False):
     gs = GameState(difficulty=difficulty, net=net, is_host=is_host)
     if difficulty == "nightmare":
         # 噩梦模式：显式把7名对手全部切换为当前最强AI
         _apply_nightmare_ai(gs)
+    if congrats_mode:
+        # 恭喜发财：全员噩梦最强AI + 五费开局 + 大妮蔻狂欢
+        _apply_congrats_mode(gs)
     if rank_mode:
         # 排位对局：对手AI按玩家段位匹配——优先同段位训练存档AI，缺失用全局最强AI兜底
         p_rank = rank_mode.get("rank", "青铜")
-        ai_params, rmult, src, opp_rank = _ranked_opponent_ai(p_rank)
-        for ai in gs.players:
-            ai["difficulty_mult"] = rmult
-            ai["_override_params"] = dict(ai_params)
-        gs._opp_rank = opp_rank
-        gs._rank_settled = False
-        gs.rank_settle_text = ""
-        gs.battle_log = f"排位对局 · 对手匹配: {src}"
+        if p_rank == "王者":
+            # 噩梦入侵排位：王者段位起，7名对手全部切换为当前最强噩梦AI，
+            # 且沿用三星五费博弈 + 学习玩家运营（随训练突破自动升级优化）
+            _apply_nightmare_ai(gs)
+            gs._opp_rank = "王者"
+            gs._rank_settled = False
+            gs.rank_settle_text = ""
+            gs._nightmare_invasion = True
+            gs.battle_log = ("排位对局 · 噩梦AI入侵！王者段位对手全部为当前最强AI · "
+                             "击败它们证明你配得上王者")
+        else:
+            ai_params, rmult, src, opp_rank = _ranked_opponent_ai(p_rank)
+            for ai in gs.players:
+                ai["difficulty_mult"] = rmult
+                ai["_override_params"] = dict(ai_params)
+            gs._opp_rank = opp_rank
+            gs._rank_settled = False
+            gs.rank_settle_text = ""
+            gs._nightmare_invasion = False
+            gs.battle_log = f"排位对局 · 对手匹配: {src}"
     if load_save and not net:
         if load_game(gs):
             gs.battle_log = "读取存档成功"
@@ -10792,6 +11606,8 @@ def run_game_session(screen, clock, difficulty, font_lg, font_md, font_sm,
                     _record_player_game(gs, "联机")
                 elif rank_mode:
                     _record_player_game(gs, "排位")
+                elif congrats_mode:
+                    _record_player_game(gs, "恭喜发财")
                 elif difficulty == "nightmare":
                     _record_player_game(gs, "噩梦")
                 else:
@@ -11037,6 +11853,15 @@ def run_game_session(screen, clock, difficulty, font_lg, font_md, font_sm,
                     if (event.type == pygame.MOUSEBUTTONDOWN
                             and event.button == 1):
                         mx, my = event.pos
+                        choices = getattr(gs, "_bounty_choice_rects", [])
+                        if gs.bounty_layer_current == 9 and choices:
+                            for idx, rect in enumerate(choices):
+                                if rect.collidepoint(mx, my):
+                                    gs._claim_bounty(idx)
+                                    break
+                            else:
+                                pass
+                            continue
                         cb = getattr(gs, "_bounty_claim_btn", None)
                         kb = getattr(gs, "_bounty_cont_btn", None)
                         if cb and cb.collidepoint(mx, my):
@@ -11685,7 +12510,7 @@ def _thunder_skill(unit, allies, enemies, effect_list):
 
 
 def main():
-    global _TRAINING_GIVE_WAY
+    global _TRAINING_GIVE_WAY, _LEARN_PLAYER_STYLE
     pygame.init()
     info = pygame.display.Info()
     if info.current_w > info.current_h and info.current_w >= 900:
@@ -11706,6 +12531,7 @@ def main():
     scene = "menu"
     difficulty = "normal"
     nightmare_mode = False  # 挑战最强AI对局标志：只影响当次对局，不改变主菜单难度
+    congrats_mode = False   # 恭喜发财对局标志：五费开局+大妮蔻狂欢+全员噩梦AI
     running = True
 
     net = None
@@ -11754,7 +12580,7 @@ def main():
         if scene == "menu":
             set_dbg("场景: 主菜单")
             (continue_btn, start_btn, multi_btn, rank_btn, challenge_btn,
-             update_btn, train_btn, settings_btn, quit_btn) = draw_main_menu(
+             congrats_btn, update_btn, train_btn, settings_btn, quit_btn) = draw_main_menu(
                 screen, font_title, font_lg, font_md, font_sm, W, H,
                 mouse_pos, difficulty)
             # 训练线程存活检测：避免“显示训练中但实际已死”卡住界面
@@ -11849,6 +12675,10 @@ def main():
                         play_sfx("buy")
                         # 挑战最强AI：专属页面 → 噩梦模式（7名对手全为最强AI）
                         scene = "challenge_page"
+                    elif congrats_btn.collidepoint(mx, my):
+                        play_sfx("buy")
+                        # 恭喜发财：专属页面 → 五费开局+大妮蔻狂欢
+                        scene = "congrats_page"
                     elif train_btn.collidepoint(mx, my):
                         play_sfx("click")
                         update_popup_open = False
@@ -11907,6 +12737,7 @@ def main():
                     if cg_start and cg_start.collidepoint(mx, my):
                         play_sfx("buy")
                         nightmare_mode = True
+                        congrats_mode = False
                         rank_match_rank = None
                         want_load = False
                         scene = "game"
@@ -11914,9 +12745,30 @@ def main():
                         play_sfx("click")
                         scene = "menu"
             pygame.display.flip()
+        elif scene == "congrats_page":
+            set_dbg("场景: 恭喜发财")
+            cf_start, cf_back = draw_congrats_page(
+                screen, font_title, font_lg, font_md, font_sm, W, H,
+                mouse_pos)
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    running = False
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    mx, my = event.pos
+                    if cf_start and cf_start.collidepoint(mx, my):
+                        play_sfx("buy")
+                        congrats_mode = True
+                        nightmare_mode = False
+                        rank_match_rank = None
+                        want_load = False
+                        scene = "game"
+                    elif cf_back and cf_back.collidepoint(mx, my):
+                        play_sfx("click")
+                        scene = "menu"
+            pygame.display.flip()
         elif scene == "settings":
             set_dbg("场景: 设置")
-            diff_rects, back_btn, changelog_btn = draw_settings_menu(
+            diff_rects, back_btn, changelog_btn, learn_btn, clear_btn = draw_settings_menu(
                 screen, font_title, font_lg, font_md, font_sm, W, H,
                 mouse_pos, difficulty)
             cl_close = None
@@ -11949,6 +12801,16 @@ def main():
                     elif changelog_btn.collidepoint(mx, my):
                         changelog_open = True
                         play_sfx("click")
+                    elif learn_btn.collidepoint(mx, my):
+                        # 噩梦AI学习玩家运营开关
+                        _LEARN_PLAYER_STYLE = not _LEARN_PLAYER_STYLE
+                        play_sfx("click")
+                    elif clear_btn.collidepoint(mx, my):
+                        # 一键清空玩家学习样本
+                        if _clear_player_history():
+                            play_sfx("buy")
+                        else:
+                            play_sfx("error")
             pygame.display.flip()
         elif scene == "lobby":
             set_dbg(f"场景: 大厅({lobby_mode})")
@@ -12069,9 +12931,11 @@ def main():
                 net=net, is_host=is_host,
                 load_save=want_load,
                 rank_mode=({"rank": rank_match_rank}
-                           if rank_match_rank else None))
+                           if rank_match_rank else None),
+                congrats_mode=congrats_mode)
             want_load = False
             nightmare_mode = False
+            congrats_mode = False
             if net:
                 net.close()
                 net = None

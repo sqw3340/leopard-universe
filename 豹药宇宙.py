@@ -1,6 +1,25 @@
 # -*- coding: utf-8 -*-
 """
 豹药宇宙 - 自走棋
+  v1.3.3 噩梦模式·挑战最强AI·内置段位池版
+    - 新增: 噩梦模式难度（7名对手全部为当前最强AI，收入+75%，挑战失败记录对局供AI升级）
+    - 新增: 主菜单【挑战最强AI】专属页面（显示当前最强AI段位/分数，一键开始挑战）
+    - 新增: 源码内置青铜→王者8段位AI池，分发无需外部json，排位对手不会降级
+    - 新增: 排位虚高保护（对手低于玩家段位：赢少加输多扣；更高：赢多加输少扣）
+    - 新增: 离线训练突破时自动把最优AI固化进豹药宇宙.py源码（带.bak备份）
+    - 优化: 段位AI强度经大样本校准（相邻段位1000局对决+200局混战，吃鸡率单调0%→49%）
+    - 修复: 训练日志显示突破复核未达标原因，不再误解"高分为何没被采纳"
+  v1.3.2 排位赛专属页面与昊天锤获取扩充版
+    - 新增: 排位赛专属页面（段位/战绩/进度条/加分机制），页面内点开始对战才进入排位
+    - 修复: 排位结算存档路径，防止打完段位没变化/重启归零
+    - 新增: 海克斯【重铸工坊】【匠人之匣】、财宝3层昊天锤×2，扩充昊天锤获取
+    - 修复: AI 误把装备拆卸器等一次性消耗道具装配到棋子身上的 BUG
+    - 优化: 极限AI训练停滞机制（大变异只动少量字段/精英不重评估/突破复核）
+    - 优化: 训练弹窗显示本代最优分
+  v1.3.1 装备装配修复版
+    - 修复: AI 误把装备拆卸器等一次性消耗道具装配到棋子身上的 BUG
+    - 新增: 装备数据表 item_type 标记(可穿戴装备/一次性消耗道具) + is_wearable_item 判定
+    - 新增: AI 装配过滤消耗道具 + 装配函数兜底拦截 + 历史误装配道具回收清理
   v1.3.0 金铲铲之战对标·伐木羁绊与道具权限完整版
     - 新增: 伐木羁绊3/5/8三档 + 巨斧选择器（常驻不消耗、跨回合保留）
     - 新增: 昊天锤(卸装→重铸→装回) / 拆卸器 / 大妮蔻 权限矩阵
@@ -176,19 +195,40 @@ BASE_MANA_REGEN_PERCENT = 0.012
 MANA_PER_HIT_TAKEN_FLAT = 1
 MANA_PER_HIT_TAKEN_PERCENT = 0.02
 
-DIFFICULTY_MULT = {"easy": 0.7, "normal": 1.0, "hard": 1.25, "extreme": 1.6}
+DIFFICULTY_MULT = {"easy": 0.7, "normal": 1.0, "hard": 1.25, "extreme": 1.6,
+                   "nightmare": 1.75}
 DIFFICULTY_NAME = {"easy": "简单", "normal": "普通",
-                    "hard": "困难", "extreme": "极限"}
-DIFFICULTY_ORDER = ["easy", "normal", "hard", "extreme"]
+                   "hard": "困难", "extreme": "极限", "nightmare": "噩梦模式"}
+DIFFICULTY_ORDER = ["easy", "normal", "hard", "extreme", "nightmare"]
 DIFFICULTY_COLOR = {"easy": (120, 220, 120), "normal": (110, 170, 240),
-                     "hard": (255, 170, 60), "extreme": (230, 80, 80)}
+                    "hard": (255, 170, 60), "extreme": (230, 80, 80),
+                    "nightmare": (200, 60, 230)}
 
-CURRENT_VERSION = "1.2.9"
+CURRENT_VERSION = "1.3.3"
 # 更新源：填你自己的远程 version.json 地址（GitHub raw 即可）
 # 留空 "" 则关闭检测更新
 UPDATE_CHECK_URL = "https://fastly.jsdelivr.net/gh/sqw3340/leopard-universe@main/version.json"
 
 CHANGELOG_TEXT = [
+    "v1.3.3  噩梦模式·挑战最强AI·内置段位池版",
+    "  · 新增 噩梦模式难度：7名对手全部为当前最强AI（收入+75%），对局记录供AI自我升级",
+    "  · 新增 主菜单【挑战最强AI】专属页面：显示当前最强AI段位/分数，一键开始挑战",
+    "  · 新增 源码内置青铜→王者8段位AI池：分发无需外部json，排位对手不会降级",
+    "  · 新增 排位虚高保护：对手低于玩家段位赢少加输多扣，更高赢多加输少扣",
+    "  · 新增 离线训练突破时自动把最优AI固化进豹药宇宙.py源码（自动生成.bak备份）",
+    "  · 优化 段位AI强度经大样本校准：相邻段位1000局对决+200局混战，吃鸡率单调0%→49%",
+    "  · 修复 训练日志显示突破复核未达标原因，不再误解高分为何没被采纳",
+    "",
+    "v1.3.2  排位赛专属页面与昊天锤获取扩充版",
+    "  · 新增 排位赛专属页面：段位/战绩/进度条/加分机制说明，页面内点击开始对战才进入排位",
+    "  · 修复 排位结算存档写入路径，避免打完段位没变化/重启归零",
+    "  · 新增 海克斯强化【重铸工坊】（金色）：获得1把昊天锤",
+    "  · 新增 海克斯强化【匠人之匣】（棱彩）：获得昊天锤+拆卸器",
+    "  · 新增 财宝猎人3层奖励备选：昊天锤×2",
+    "  · 修复 AI 不再把拆卸器等消耗型道具装配到棋子身上",
+    "  · 优化 极限AI训练停滞机制：大变异只动少量字段、精英不重评估、突破复核过滤运气",
+    "  · 优化 训练弹窗显示本代最优分，替代易误导的最后候选分",
+    "",
     "v1.3.0  金铲铲之战对标·伐木羁绊与道具权限完整版",
     "  · 新增 伐木（Lumber）羁绊三档：3/5/8，8伐木为棱彩终极羁绊",
     "  · 新增 巨斧选择器：物品栏常驻、不消耗、跨回合保留首领标记",
@@ -456,10 +496,7 @@ def load_game(gs):
             data = pickle.load(f)
         gs.difficulty = data.get("difficulty", gs.difficulty)
         gs.me = data.get("me", gs.me)
-        # 旧存档补发常驻巨斧选择器
-        if not any(it.get("special_kind") == "giant_axe"
-                   for it in gs.me.get("items", [])):
-            gs.me.setdefault("items", []).append(make_special_item("giant_axe"))
+        # 旧存档不再补发常驻巨斧；改为 sync_lumber_marks 按伐木棋子存在条件发放
         gs.players = data.get("players", gs.players)
         gs.stage = tuple(data.get("stage", (1, 1)))
         gs.round_counter = data.get("round_counter", 0)
@@ -1145,7 +1182,7 @@ for (_a, _b), _trait in EMBLEM_RECIPES.items():
 def new_item(iid):
     item = {"id": iid, "name": ITEMS[iid]["name"],
             "stats": dict(ITEMS[iid]["stats"]), "color": ITEMS[iid]["color"],
-            "is_combined": False}
+            "is_combined": False, "item_type": "wearable"}
     if iid == "leopard_talisman":
         item["is_rune"] = True
         item["rune_kind"] = "leopard"
@@ -1169,7 +1206,8 @@ def try_combine_items(items):
                 r = COMBINE_TABLE[key]
                 new_it = {"id": "combined_" + "_".join(sorted(key)),
                           "name": r["name"], "stats": dict(r["stats"]),
-                          "color": r["color"], "is_combined": True}
+                          "color": r["color"], "is_combined": True,
+                          "item_type": "wearable"}
                 if r.get("rune_kind"):
                     new_it["rune_kind"] = r["rune_kind"]
                     new_it["is_rune"] = True
@@ -1429,6 +1467,8 @@ TREASURE_AUGMENTS = [
     {"name": "神器宝匣", "desc": "获得1件随机豹药神器。", "reward": "artifact"},
     {"name": "光明锻造", "desc": "获得1件随机光明装备。", "reward": "radiant"},
     {"name": "宝物工坊", "desc": "获得1个随机特殊道具：昊天锤、拆卸器、大妮蔻、光明宝箱或杰作升级器。", "reward": "special"},
+    {"name": "重铸工坊", "desc": "获得1把昊天锤，可重铸目标英雄全部装备。", "reward": "haotian_hammer"},
+    {"name": "匠人之匣", "desc": "获得昊天锤与拆卸器，自由拆解、重铸你的装备。", "reward": "hammer_kit"},
     {"name": "远古宝库", "desc": "随机获得一件高阶宝物。", "reward": "rare_bundle"},
 ]
 
@@ -1446,6 +1486,8 @@ def _make_augment_reward_item(kind):
         return random_radiant_item()
     if kind == "special":
         return make_special_item(random.choice(["haotian_hammer", "disassembler", "mega_neeko", "radiant_chest", "masterwork_upgrader"]))
+    if kind == "haotian_hammer":
+        return make_special_item("haotian_hammer")
     if kind == "rare_bundle":
         return random.choice([make_artifact_item(), random_radiant_item(),
                               make_special_item("masterwork_upgrader")])
@@ -1485,14 +1527,19 @@ def grant_emblem_tome(player):
 def _grant_augment_reward(player, reward_kind):
     if reward_kind == "tome":
         return grant_emblem_tome(player)
-    item = _make_augment_reward_item(reward_kind)
-    if item is None:
-        return False
-    if len(player.get("items", [])) < MAX_ITEM_BENCH:
-        player.setdefault("items", []).append(item)
+    if reward_kind == "hammer_kit":
+        # 匠人之匣：一次发放昊天锤 + 拆卸器
+        items = [make_special_item("haotian_hammer"),
+                 make_special_item("disassembler")]
     else:
-        player.setdefault("free_item_store", []).append(item)
-    return True
+        item = _make_augment_reward_item(reward_kind)
+        items = [item] if item is not None else []
+    for it in items:
+        if len(player.get("items", [])) < MAX_ITEM_BENCH:
+            player.setdefault("items", []).append(it)
+        else:
+            player.setdefault("free_item_store", []).append(it)
+    return bool(items)
 
 
 def roll_global_augment():
@@ -1567,6 +1614,29 @@ SPECIAL_ITEM_DATA = {
     "giant_axe": ("巨斧选择器", "标记1名棋盘伐木弈子为伐木首领（仅备战阶段可用，可反复使用，不消耗）。"),
 }
 
+# 一次性消耗型特殊道具清单（不可穿戴到棋子身上，拖到棋子即执行或作为工具使用）。
+# 与【可穿戴装备】相对：纹章(emblem_*)/神器(is_artifact)/普通装备/灵符属于可穿戴装备；
+# 下列特殊道具只是消耗功能道具，AI 装配时会被过滤，装配函数也会拦截。
+SPECIAL_ITEM_CONSUMABLE_KINDS = frozenset({
+    "disassembler", "haotian_hammer", "masterwork_upgrader",
+    "mega_neeko", "radiant_chest", "emblem_tome", "orb",
+    "artifact_forge", "giant_axe",
+})
+
+def is_wearable_item(item):
+    """判定道具是否为【可穿戴装备】（普通装备/成装/纹章/神器/灵符），
+    而非【一次性消耗道具】（拆卸器/昊天锤/法球等）。
+
+    优先读取创建时写入的 item_type 标记；对旧存档等未打标记的数据，
+    回退到结构特征判断（is_special 且非纹章/神器 → 消耗道具）。
+    """
+    t = item.get("item_type")
+    if t is not None:
+        return t == "wearable"
+    if item.get("is_special") and not item.get("is_emblem") and not item.get("is_artifact"):
+        return False
+    return True
+
 
 RUNE_ITEM_DATA = {
     "leopard": {
@@ -1603,6 +1673,7 @@ def make_rune_item(kind):
         "color": (180, 90, 255),
         "is_combined": is_combined,
         "is_rune": True, "rune_kind": kind,
+        "item_type": "wearable",
     }
 
 
@@ -1667,6 +1738,9 @@ def _bounty_reward_options(layer):
             {"name": "2散件+4金", "desc": "2 件散件 +4金币", "items": [("base", 2)], "gold": 4},
             {"name": "随机豹药神器+昊天锤", "desc": "随机豹药神器 + 昊天锤",
              "items": [("artifact_random", 1), ("special", "haotian_hammer", "昊天锤", "敲击装备后随机重铸")]},
+            {"name": "昊天锤×2", "desc": "2 把昊天锤，尽情重铸装备",
+             "items": [("special", "haotian_hammer", "昊天锤", "敲击装备后随机重铸"),
+                       ("special", "haotian_hammer", "昊天锤", "敲击装备后随机重铸")]},
         ],
         4: [
             {"name": "豹药神器+成装+6金", "desc": "随机豹药神器 + 成装 +6金币",
@@ -1774,6 +1848,7 @@ def make_special_item(kind):
         "is_special": True,
         "is_combined": True,
         "special_kind": kind,
+        "item_type": "consumable" if kind in SPECIAL_ITEM_CONSUMABLE_KINDS else "wearable",
     }
     if kind in ("emblem_treasure", "emblem_lumber"):
         item["is_emblem"] = True
@@ -1794,6 +1869,7 @@ def make_trait_emblem(trait):
         "special_kind": "emblem_generic",
         "is_emblem": True,
         "emblem_trait": trait,
+        "item_type": "wearable",
     }
 
 def make_artifact_item(name=None):
@@ -1809,6 +1885,7 @@ def make_artifact_item(name=None):
         "is_artifact": True,
         "artifact_name": name,
         "is_combined": True,
+        "item_type": "wearable",
     }
 
 def _reroll_item(item):
@@ -2904,6 +2981,7 @@ def ai_detect_target_traits(p):
 
 
 def ai_card_score(p, card, target_traits):
+    P = EXTREME_AI_PARAMS
     score = 0
     name = card["name"]
     cost = card["cost"]
@@ -2911,31 +2989,39 @@ def ai_card_score(p, card, target_traits):
     same1 = count_unit_owned(p, name, 1)
     same2 = count_unit_owned(p, name, 2)
     if same2 >= 2:
-        score += 120
+        score += P["w_star2_pair"]
     elif same2 == 1:
-        score += 40
+        score += P["w_star2_single"]
     elif same1 == 2:
-        score += 90
+        score += P["w_star1_pair"]
     elif same1 == 1:
-        score += 35
+        score += P["w_star1_single"]
     else:
-        score += 1
+        score += P["w_base"]
+    owned_traits = count_traits(p)
     for t in traits:
         if t in target_traits:
-            score += 6
-        elif t in count_traits(p):
-            score += 2
+            score += P["w_trait_plan"]
+        elif t in owned_traits:
+            score += P["w_trait_owned"]
+    # 财宝猎人：场上已有财宝数越多越愿意买财宝卡（凑羁绊叠层收菜）
+    if "Treasure" in traits:
+        score += P.get("w_bounty_trait", 0) * (owned_traits.get("Treasure", 0) + 1)
+    # 5费卡：当前等级5费刷新概率越高越愿意拿（配合高人口打高费阵容）
+    if cost == 5:
+        _odds5 = SHOP_ODDS.get(p["level"], SHOP_ODDS[MAX_LEVEL])[4]
+        score += P.get("w_5cost", 0) * (_odds5 / 10.0)
     counter = p.get("_counter_target")
     if counter and counter in traits:
-        score += 4
-    score += cost
+        score += P["w_counter"]
+    score += cost * P["w_cost"]
     gold_after = p["gold"] - cost
     if gold_after < 5:
-        score -= 10
+        score -= P["p_gold_low"]
     elif gold_after < 15:
-        score -= 4
+        score -= P["p_gold_mid"]
     elif gold_after < 30:
-        score -= 1
+        score -= P["p_gold_high"]
     return score
 
 
@@ -2959,7 +3045,7 @@ def ai_smart_buy(p):
             if score > best_score:
                 best_score = score
                 best_idx = idx
-        if best_idx < 0 or best_score < 4:
+        if best_idx < 0 or best_score < EXTREME_AI_PARAMS["min_buy_score"]:
             break
         empty_bench = next((i for i, s in enumerate(p["bench"]) if s is None), None)
         if empty_bench is None:
@@ -3015,6 +3101,11 @@ def ai_smart_level_up(p):
     reserve = behavior.get("level_reserve", 20)
     if p["hp"] < 40:
         reserve = max(4, reserve // 2)
+    # 特征修正：当前等级5费概率越高 → 越愿意花钱升人口（打高费/九五阵容）
+    P = EXTREME_AI_PARAMS
+    _odds5 = SHOP_ODDS.get(p["level"], SHOP_ODDS[MAX_LEVEL])[4]
+    reserve -= int(P.get("w_level_up", 0) * (_odds5 / 10.0))
+    reserve = max(2, reserve)
     while p["level"] < MAX_LEVEL and p["gold"] - BUY_XP_COST >= reserve:
         if not ai_buy_xp(p):
             break
@@ -3185,6 +3276,50 @@ def ai_auto_position(p):
         p["bench"][i] = leftover[i]
 
 
+def _reclaim_illegal_equipped_items(p):
+    """兜底清理：把历史版本误装配到棋子身上的消耗型道具回收回物品栏。
+
+    覆盖棋盘 + 备战席；物品栏满则暂存溢出仓库(free_item_store)，不丢失道具。
+    正常局内不会触发，用于修复旧存档/旧AI留下的脏状态。
+    """
+    containers = [u for row in p.get("board", []) for u in row if u is not None]
+    containers += [u for u in p.get("bench", []) if u is not None]
+    reclaimed = []
+    for u in containers:
+        items = u.get("items", [])
+        if not items:
+            continue
+        keep = []
+        for it in items:
+            if is_wearable_item(it):
+                keep.append(it)
+            else:
+                reclaimed.append(it)
+        u["items"] = keep
+    total = len(reclaimed)
+    if not total:
+        return 0
+    inv = p.setdefault("items", [])
+    space = MAX_ITEM_BENCH - len(inv)
+    if space > 0:
+        inv.extend(reclaimed[:space])
+        reclaimed = reclaimed[space:]
+    if reclaimed:
+        p.setdefault("free_item_store", []).extend(reclaimed)
+    return total
+
+
+def _ai_equip_item(p, u, item):
+    """AI 装配单件道具（兜底校验）：消耗型道具一律拒绝装配，留在物品栏。"""
+    if not is_wearable_item(item):
+        return False
+    if len(u.get("items", [])) >= MAX_ITEMS_PER_UNIT:
+        return False
+    u.setdefault("items", []).append(item)
+    u["items"] = try_combine_items_all(u["items"])
+    return True
+
+
 def ai_equip_items(p):
     if not p.get("items"):
         return
@@ -3193,6 +3328,10 @@ def ai_equip_items(p):
         p["items"] = new_items
         if not combined:
             break
+
+    # 过滤一次性消耗道具（拆卸器/昊天锤/法球等）：只装配可穿戴装备，消耗道具留在物品栏
+    wearable = [it for it in p["items"] if is_wearable_item(it)]
+    leftover = [it for it in p["items"] if not is_wearable_item(it)]
 
     best_unit_pos = None
     best_score = -1
@@ -3211,19 +3350,24 @@ def ai_equip_items(p):
                 best_score = score
                 best_unit_pos = ("board", r, c)
     if best_unit_pos is None:
+        p["items"] = leftover + wearable
         return
     _, r, c = best_unit_pos
     u = p["board"][r][c]
-    while p["items"] and len(u.get("items", [])) < MAX_ITEMS_PER_UNIT:
-        item = p["items"].pop(0)
-        u.setdefault("items", []).append(item)
-        u["items"] = try_combine_items_all(u["items"])
+    while wearable and len(u.get("items", [])) < MAX_ITEMS_PER_UNIT:
+        item = wearable.pop(0)
+        _ai_equip_item(p, u, item)
+    p["items"] = leftover + wearable
 
 
 def ai_smart_equip(p, all_players):
     if not p.get("items"):
         return
     p["items"] = try_combine_items_all(p["items"])
+
+    # 过滤一次性消耗道具：smart_equip 只从可穿戴装备中挑选装配
+    wearable = [it for it in p["items"] if is_wearable_item(it)]
+    leftover = [it for it in p["items"] if not is_wearable_item(it)]
 
     phys = magic = 0
     for other in (all_players or []):
@@ -3241,7 +3385,7 @@ def ai_smart_equip(p, all_players):
     prefer = "armor" if phys >= magic else "mr"
 
     for _ in range(MAX_ITEM_BENCH):
-        if not p["items"]:
+        if not wearable:
             break
         target = None
         best = -1
@@ -3261,21 +3405,188 @@ def ai_smart_equip(p, all_players):
         if target is None:
             break
         equipped = False
-        for i, item in enumerate(p["items"]):
+        for i, item in enumerate(wearable):
             stats = item.get("stats", {})
             if prefer in stats:
-                p["items"].pop(i)
+                wearable.pop(i)
                 target.setdefault("items", []).append(item)
                 target["items"] = try_combine_items_all(target["items"])
                 equipped = True
                 break
         if not equipped:
-            item = p["items"].pop(0)
+            item = wearable.pop(0)
             target.setdefault("items", []).append(item)
             target["items"] = try_combine_items_all(target["items"])
+    p["items"] = leftover + wearable
+
+
+# ============================================================
+#  极限 AI 可进化参数（离线训练用）
+# ============================================================
+EXTREME_AI_PARAMS_DEFAULT = {
+    # 行为开关（与 AI_BEHAVIOR 结构兼容，极难被打分器改）
+    "skip_chance": 0.0,
+    "prune_board": True,
+    "counter_pick": True,
+    "smart_equip": True,
+    "refresh_budget": 20,
+    "level_reserve": 8,
+    # 买牌打分权重
+    "w_star2_pair": 120,
+    "w_star2_single": 40,
+    "w_star1_pair": 90,
+    "w_star1_single": 35,
+    "w_base": 1,
+    "w_trait_plan": 6,
+    "w_trait_owned": 2,
+    "w_counter": 4,
+    "w_cost": 1,
+    "p_gold_low": 10,
+    "p_gold_mid": 4,
+    "p_gold_high": 1,
+    "min_buy_score": 4,
+    # 新特征权重：财宝猎人 / 连败 / 血量 / 升级 / 5费
+    "w_bounty_trait": 3,      # 场上财宝羁绊数 → 买财宝卡的倾向
+    "w_bounty_layer": 4,      # 财宝层数 → 刷新投入（层越高越发力）
+    "w_lose_streak": 2,       # 连败数 → 刷新投入（止血冲质量）
+    "w_hp_low": 3,            # 血量压力 → 刷新投入（残血转连胜保命）
+    "w_level_up": 2,          # 5费概率 → 升人口倾向（打高费阵容）
+    "w_5cost": 2,             # 5费概率 → 买5费卡倾向
+    # 分档经济决策
+    "refresh_budget_low_hp": 10,
+    "refresh_budget_mid_hp": 20,
+    "refresh_budget_high_lv": 40,
+    "refresh_budget_default": 50,
+}
+# 全局可变参数（被进化覆盖）
+EXTREME_AI_PARAMS = dict(EXTREME_AI_PARAMS_DEFAULT)
+EXTREME_AI_PARAMS_FILE = "extreme_ai_params.json"
+
+# ================== 训练突破自动固化区 ==================
+# 离线训练产生新的全局最优AI时，系统自动把最优权重写入下方 BUILTIN_EXTREME_AI
+# （写入前自动生成 .bak 备份防断电损坏）。没有外部json的电脑直接用内置AI；
+# 本地存在 extreme_ai_params.json 则优先读外部文件（训练运行时使用）。
+# ----- BEGIN BUILTIN_EXTREME_AI AUTO SAVE -----
+BUILTIN_EXTREME_AI = {
+    "skip_chance": 0.0,
+    "prune_board": True,
+    "counter_pick": True,
+    "smart_equip": True,
+    "refresh_budget": 20,
+    "level_reserve": 8,
+    "w_star2_pair": 120,
+    "w_star2_single": 40,
+    "w_star1_pair": 90,
+    "w_star1_single": 35,
+    "w_base": 1,
+    "w_trait_plan": 6,
+    "w_trait_owned": 2,
+    "w_counter": 4,
+    "w_cost": 1,
+    "p_gold_low": 10,
+    "p_gold_mid": 4,
+    "p_gold_high": 1,
+    "min_buy_score": 4,
+    "w_bounty_trait": 3,
+    "w_bounty_layer": 4,
+    "w_lose_streak": 2,
+    "w_hp_low": 3,
+    "w_level_up": 2,
+    "w_5cost": 2,
+    "refresh_budget_low_hp": 10,
+    "refresh_budget_mid_hp": 20,
+    "refresh_budget_high_lv": 40,
+    "refresh_budget_default": 50,
+}
+# ----- END BUILTIN_EXTREME_AI AUTO SAVE -----
+
+
+def _overwrite_builtin_ai_in_source(params):
+    """训练突破时把最优AI权重自动固化进豹药宇宙.py源码。
+    只替换 BEGIN/END 标记块内的字典，其余代码不动；
+    写前备份 .bak，写后原子替换，防止写一半损坏源码。"""
+    src_path = get_script_path()
+    if not src_path or not os.path.exists(src_path):
+        return False
+    try:
+        with open(src_path, "r", encoding="utf-8") as f:
+            text = f.read()
+        marker = "BEGIN BUILTIN_EXTREME_AI AUTO SAVE"
+        end_marker = "END BUILTIN_EXTREME_AI AUTO SAVE"
+        if marker not in text or end_marker not in text:
+            return False
+        body = ",\n    ".join(f'"{k}": {v!r}' for k, v in params.items())
+        new_dict = "{\n    " + body + ",\n}"
+        pattern = re.compile(
+            r"BUILTIN_EXTREME_AI = .*?\n# ----- " + re.escape(end_marker), re.S)
+        if not pattern.search(text):
+            return False
+        replacement = ("BUILTIN_EXTREME_AI = " + new_dict +
+                       "\n# ----- " + end_marker)
+        text2 = pattern.sub(replacement, text)
+        # 先备份当前源码，再原子写入
+        with open(src_path + ".bak", "w", encoding="utf-8") as f:
+            f.write(text)
+        tmp = src_path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(text2)
+        os.replace(tmp, src_path)
+        return True
+    except Exception as e:
+        log_once("overwrite_builtin_ai", e)
+        return False
+
+
+def load_extreme_params():
+    """读档：json 存在就用存档覆盖全局。缺新键用内置AI补齐，
+    保证老存档可进化；无 json / 损坏则回退到源码内置AI（训练固化的最强AI）。"""
+    global EXTREME_AI_PARAMS
+    if not os.path.exists(EXTREME_AI_PARAMS_FILE):
+        EXTREME_AI_PARAMS = dict(BUILTIN_EXTREME_AI)
+        return False
+    try:
+        with open(EXTREME_AI_PARAMS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        merged = dict(BUILTIN_EXTREME_AI)
+        for k, v in data.items():
+            if k in merged:
+                merged[k] = v
+        EXTREME_AI_PARAMS = merged
+        return True
+    except Exception as e:
+        log_once("load_extreme_params", e)
+        EXTREME_AI_PARAMS = dict(BUILTIN_EXTREME_AI)
+        return False
+
+
+def save_extreme_params():
+    try:
+        with open(EXTREME_AI_PARAMS_FILE, "w", encoding="utf-8") as f:
+            json.dump(EXTREME_AI_PARAMS, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        log_once("save_extreme_params", e)
+        return False
+
+
+def reset_extreme_params():
+    global EXTREME_AI_PARAMS
+    EXTREME_AI_PARAMS = dict(EXTREME_AI_PARAMS_DEFAULT)
+    save_extreme_params()
+
+
+# 启动时自动读档（有存档就用进化后的参数）
+try:
+    load_extreme_params()
+except Exception:
+    pass
 
 
 def get_ai_behavior(p):
+    # 快照对手：用自己的参数，不读全局
+    override = p.get("_override_params")
+    if override is not None:
+        return override
     mult = p.get("difficulty_mult", 1.0)
     if mult <= 0.85:
         return AI_BEHAVIOR["easy"]
@@ -3283,11 +3594,14 @@ def get_ai_behavior(p):
         return AI_BEHAVIOR["normal"]
     if mult <= 1.4:
         return AI_BEHAVIOR["hard"]
-    return AI_BEHAVIOR["extreme"]
+    # 极限 AI：返回可进化参数字典（含 behavior 字段 + 打分权重）
+    return EXTREME_AI_PARAMS
 
 
 def ai_do_turn(p, all_players=None):
     behavior = get_ai_behavior(p)
+    # 兜底：回收历史版本误装配到棋子身上的消耗型道具（拆卸器等），防止残留
+    _reclaim_illegal_equipped_items(p)
 
     if behavior["skip_chance"] > 0 and random.random() < behavior["skip_chance"]:
         if not p.get("shop_locked"):
@@ -3327,16 +3641,23 @@ def ai_do_turn(p, all_players=None):
     ai_auto_position(p)
 
     if behavior["refresh_budget"] is None:
-          if p["hp"] < 25:
-               refresh_budget = 10
-          elif p["hp"] < 40:
-               refresh_budget = 20
-          elif p["level"] >= 7:
-               refresh_budget = 40
-          else:
-               refresh_budget = 50
+        P = EXTREME_AI_PARAMS
+        if p["hp"] < 25:
+            refresh_budget = P["refresh_budget_low_hp"]
+        elif p["hp"] < 40:
+            refresh_budget = P["refresh_budget_mid_hp"]
+        elif p["level"] >= 7:
+            refresh_budget = P["refresh_budget_high_lv"]
+        else:
+            refresh_budget = P["refresh_budget_default"]
     else:
-           refresh_budget = behavior["refresh_budget"]
+        refresh_budget = behavior["refresh_budget"]
+    # 特征修正：财宝层数越高/连败越多/血量越危险 → 越激进投入刷新（冲质量保命/发力收菜）
+    P = EXTREME_AI_PARAMS
+    refresh_budget -= int(P.get("w_bounty_layer", 0) * max(0, p.get("_bounty_layer", 1) - 1))
+    refresh_budget -= int(P.get("w_lose_streak", 0) * p.get("lose_streak", 0))
+    refresh_budget -= int(P.get("w_hp_low", 0) * max(0, 40 - p["hp"]))
+    refresh_budget = max(0, refresh_budget)
 
     if p["gold"] >= refresh_budget:
         p["gold"] -= REFRESH_COST
@@ -3346,8 +3667,820 @@ def ai_do_turn(p, all_players=None):
         ai_auto_position(p)
 
 
+# ============================================================
+#  极限 AI 离线进化：无渲染模拟器 + 遗传算法
+# ============================================================
+_TRAINING_STATE = {
+    "running": False,
+    "stop_requested": False,
+    "generation": 0,
+    "best_score": 0.0,
+    "best_params": None,
+    "current_variant": 0,
+    "current_population": 12,
+    "current_games_per_variant": 6,
+    "current_score": 0.0,
+    "log": [],
+    # 三阶段课程：1=普通 2=困难 3=自我对弈
+    "phase": 1,
+    "phase_label": "普通",
+    "rank": "青铜",
+    "pool_size": 2,
+    "no_breakthrough_gens": 0,
+}
+
+# 前台游玩让步开关：主线程在打对局时置True，训练线程每候选评估后让出CPU片刻
+_TRAINING_GIVE_WAY = False
+
+
+# 对手池 + 段位：段位本质是池子大小
+EXTREME_AI_OPPONENT_POOL = ["normal", "hard"]
+EXTREME_AI_SNAPSHOT_POOL = []
+EXTREME_AI_POOL_MAX = 30
+EXTREME_AI_RANKS = [
+    (2, "青铜"), (4, "白银"), (7, "黄金"), (10, "铂金"),
+    (14, "钻石"), (19, "大师"), (25, "宗师"), (30, "王者"),
+]
+
+
+def _rank_from_pool(pool_size):
+    """段位换算：池子越大段位越高。"""
+    rank = "青铜"
+    for need, r in EXTREME_AI_RANKS:
+        if pool_size >= need:
+            rank = r
+    return rank
+
+
+def _make_curriculum_opponent(phase):
+    """按课程阶段生成对手：
+    阶段1=普通AI；阶段2=困难AI；
+    阶段3=基础对手+快照池+基于玩家对局数据的参考对手（自我对弈）。
+    """
+    if phase <= 1:
+        return create_empty_player(gold=0, is_ai=True,
+                                   difficulty_mult=DIFFICULTY_MULT["normal"])
+    if phase == 2:
+        return create_empty_player(gold=0, is_ai=True,
+                                   difficulty_mult=DIFFICULTY_MULT["hard"])
+    # 阶段3：有概率抽到基于玩家对局信息生成的对手（提取强度/节奏，供AI学习）
+    if random.random() < 0.40:
+        player_ai = _make_player_data_opponent()
+        if player_ai is not None:
+            return player_ai
+    pool = EXTREME_AI_SNAPSHOT_POOL
+    if pool and random.random() < 0.55:
+        snap = random.choice(pool)
+        p = create_empty_player(gold=0, is_ai=True, difficulty_mult=1.6)
+        p["_override_params"] = dict(snap)
+        return p
+    choice = random.choice(EXTREME_AI_OPPONENT_POOL)
+    return create_empty_player(gold=0, is_ai=True,
+                               difficulty_mult=DIFFICULTY_MULT[choice])
+
+
+def _record_snapshot(params):
+    """阶段3：每次突破都把当前最优加进快照池。上限30，超了踢最旧。"""
+    pool = EXTREME_AI_SNAPSHOT_POOL
+    if len(pool) >= EXTREME_AI_POOL_MAX:
+        pool.pop(0)
+    pool.append(dict(params))
+    _TRAINING_STATE["pool_size"] = len(pool) + len(EXTREME_AI_OPPONENT_POOL)
+    _TRAINING_STATE["rank"] = _rank_from_pool(_TRAINING_STATE["pool_size"])
+
+
+def _advance_phase_if_ready(score, thresholds):
+    """阶段只能前进，不能回退。"""
+    st = _TRAINING_STATE
+    phase = st.get("phase", 1)
+    if phase < 3:
+        target = thresholds.get(phase)
+        if target is not None and score >= target:
+            st["phase"] = phase + 1
+    st["phase_label"] = {1: "普通", 2: "困难", 3: "自我对弈"}.get(
+        st["phase"], "自我对弈")
+    st["pool_size"] = len(EXTREME_AI_SNAPSHOT_POOL) + len(EXTREME_AI_OPPONENT_POOL)
+    st["rank"] = _rank_from_pool(st["pool_size"])
+
+
+# ============================================================
+#  训练断点存档：重进游戏接着上次继续，只强不弱
+# ============================================================
+TRAINING_STATE_SAVE_FILE = "training_progress.json"
+
+
+def _save_training_progress():
+    st = _TRAINING_STATE
+    data = {
+        "generation": st.get("generation", 0),
+        "best_score": st.get("best_score", 0.0),
+        "best_params": st.get("best_params"),
+        "phase": st.get("phase", 1),
+        "phase_label": st.get("phase_label", "普通"),
+        "no_breakthrough_gens": st.get("no_breakthrough_gens", 0),
+        "snapshot_pool": EXTREME_AI_SNAPSHOT_POOL,
+    }
+    try:
+        with open(TRAINING_STATE_SAVE_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        log_once("save_training_progress", e)
+        return False
+
+
+def _load_training_progress():
+    try:
+        if not os.path.exists(TRAINING_STATE_SAVE_FILE):
+            return None
+        with open(TRAINING_STATE_SAVE_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        log_once("load_training_progress", e)
+        return None
+
+
+# ============================================================
+#  排位赛：分数制段位 + 按段位匹配对手AI
+# ============================================================
+RANK_SAVE_FILE = "rank_save.json"
+RANK_TABLE = [
+    (0, "青铜"), (100, "白银"), (250, "黄金"), (450, "铂金"),
+    (700, "钻石"), (1000, "大师"), (1400, "宗师"), (1900, "王者"),
+]
+RANK_WIN_PTS = 20
+RANK_LOSE_PTS = 10
+# 段位 -> 对手AI强度系数（收入与行为随难度缩放）
+# 系数已过大样本校准（相邻段位各1000局对决 + 8人混战200局，吃鸡率单调0%→49%）
+RANK_AI_MULT = {
+    "青铜": 0.7, "白银": 0.9, "黄金": 1.0, "铂金": 1.2,
+    "钻石": 1.3, "大师": 1.45, "宗师": 1.6, "王者": 1.75,
+}
+# 大师及以上：对手直接使用训练进化出的极限AI
+RANK_EXTREME_AI_FROM = "大师"
+
+# 排位段位顺序（用于虚高保护分数缩放）
+RANK_ORDER_LIST = ["青铜", "白银", "黄金", "铂金", "钻石", "大师", "宗师", "王者"]
+
+# ===================== 出厂内置全套段位AI（分发自带，无需外部json） =====================
+# 别人下载你的游戏没有 ai_*.json，排位对手也不会降级：这里写死青铜→王者8档完整权重。
+# 强度梯度经大样本校准：相邻段位1000局对决全部高段位占优（最低胜率53.7%，
+# 95%CI下限50.6%），8人混战200局吃鸡率 青铜0%→王者49% 严格单调。
+# 用户本地训练出更强AI时会生成 ai_xxx.json，加载优先级高于本内置池。
+BUILTIN_RANKED_AI_POOL = {
+    "青铜": {"mult": 0.7, "params": {
+        "skip_chance": 0.30, "prune_board": False, "counter_pick": False,
+        "smart_equip": False, "refresh_budget": 60, "level_reserve": 28,
+        "w_star2_pair": 90, "w_star2_single": 30, "w_star1_pair": 60,
+        "w_star1_single": 20, "w_base": 1, "w_trait_plan": 3,
+        "w_trait_owned": 1, "w_counter": 1, "w_cost": 1,
+        "p_gold_low": 2, "p_gold_mid": 1, "p_gold_high": 0,
+        "min_buy_score": 2, "w_bounty_trait": 1, "w_bounty_layer": 1,
+        "w_lose_streak": 0, "w_hp_low": 1, "w_level_up": 1, "w_5cost": 1,
+        "refresh_budget_low_hp": 45, "refresh_budget_mid_hp": 50,
+        "refresh_budget_high_lv": 55, "refresh_budget_default": 60,
+    }},
+    "白银": {"mult": 0.9, "params": {
+        "skip_chance": 0.16, "prune_board": True, "counter_pick": False,
+        "smart_equip": True, "refresh_budget": 45, "level_reserve": 24,
+        "w_star2_pair": 110, "w_star2_single": 35, "w_star1_pair": 75,
+        "w_star1_single": 25, "w_base": 1, "w_trait_plan": 5,
+        "w_trait_owned": 2, "w_counter": 2, "w_cost": 1,
+        "p_gold_low": 5, "p_gold_mid": 2, "p_gold_high": 1,
+        "min_buy_score": 4, "w_bounty_trait": 2, "w_bounty_layer": 2,
+        "w_lose_streak": 1, "w_hp_low": 2, "w_level_up": 2, "w_5cost": 1,
+        "refresh_budget_low_hp": 30, "refresh_budget_mid_hp": 40,
+        "refresh_budget_high_lv": 45, "refresh_budget_default": 50,
+    }},
+    "黄金": {"mult": 1.0, "params": {
+        "skip_chance": 0.08, "prune_board": True, "counter_pick": True,
+        "smart_equip": True, "refresh_budget": None, "level_reserve": 20,
+        "w_star2_pair": 120, "w_star2_single": 40, "w_star1_pair": 90,
+        "w_star1_single": 35, "w_base": 1, "w_trait_plan": 6,
+        "w_trait_owned": 2, "w_counter": 4, "w_cost": 1,
+        "p_gold_low": 10, "p_gold_mid": 4, "p_gold_high": 1,
+        "min_buy_score": 4, "w_bounty_trait": 3, "w_bounty_layer": 4,
+        "w_lose_streak": 2, "w_hp_low": 3, "w_level_up": 3, "w_5cost": 2,
+        "refresh_budget_low_hp": 15, "refresh_budget_mid_hp": 25,
+        "refresh_budget_high_lv": 40, "refresh_budget_default": 50,
+    }},
+    "铂金": {"mult": 1.2, "params": {
+        "skip_chance": 0.0, "prune_board": True, "counter_pick": True,
+        "smart_equip": True, "refresh_budget": 25, "level_reserve": 16,
+        "w_star2_pair": 120, "w_star2_single": 40, "w_star1_pair": 90,
+        "w_star1_single": 35, "w_base": 1, "w_trait_plan": 6,
+        "w_trait_owned": 3, "w_counter": 5, "w_cost": 1,
+        "p_gold_low": 12, "p_gold_mid": 5, "p_gold_high": 2,
+        "min_buy_score": 4, "w_bounty_trait": 3, "w_bounty_layer": 3,
+        "w_lose_streak": 3, "w_hp_low": 3, "w_level_up": 3, "w_5cost": 2,
+        "refresh_budget_low_hp": 12, "refresh_budget_mid_hp": 20,
+        "refresh_budget_high_lv": 35, "refresh_budget_default": 45,
+    }},
+    "钻石": {"mult": 1.3, "params": {
+        "skip_chance": 0.0, "prune_board": True, "counter_pick": True,
+        "smart_equip": True, "refresh_budget": 25, "level_reserve": 14,
+        "w_star2_pair": 125, "w_star2_single": 42, "w_star1_pair": 95,
+        "w_star1_single": 36, "w_base": 1, "w_trait_plan": 7,
+        "w_trait_owned": 3, "w_counter": 6, "w_cost": 1,
+        "p_gold_low": 14, "p_gold_mid": 6, "p_gold_high": 2,
+        "min_buy_score": 4, "w_bounty_trait": 4, "w_bounty_layer": 4,
+        "w_lose_streak": 4, "w_hp_low": 2, "w_level_up": 4, "w_5cost": 3,
+        "refresh_budget_low_hp": 10, "refresh_budget_mid_hp": 18,
+        "refresh_budget_high_lv": 32, "refresh_budget_default": 42,
+    }},
+    "大师": {"mult": 1.45, "params": {
+        "skip_chance": 0.0, "prune_board": True, "counter_pick": True,
+        "smart_equip": True, "refresh_budget": 20, "level_reserve": 10,
+        "w_star2_pair": 130, "w_star2_single": 45, "w_star1_pair": 100,
+        "w_star1_single": 38, "w_base": 1, "w_trait_plan": 8,
+        "w_trait_owned": 3, "w_counter": 6, "w_cost": 1,
+        "p_gold_low": 16, "p_gold_mid": 7, "p_gold_high": 3,
+        "min_buy_score": 5, "w_bounty_trait": 5, "w_bounty_layer": 5,
+        "w_lose_streak": 4, "w_hp_low": 2, "w_level_up": 6, "w_5cost": 5,
+        "refresh_budget_low_hp": 8, "refresh_budget_mid_hp": 16,
+        "refresh_budget_high_lv": 30, "refresh_budget_default": 40,
+    }},
+    "宗师": {"mult": 1.6, "params": {
+        "skip_chance": 0.0, "prune_board": True, "counter_pick": True,
+        "smart_equip": True, "refresh_budget": 20, "level_reserve": 9,
+        "w_star2_pair": 135, "w_star2_single": 47, "w_star1_pair": 105,
+        "w_star1_single": 40, "w_base": 1, "w_trait_plan": 9,
+        "w_trait_owned": 3, "w_counter": 7, "w_cost": 1,
+        "p_gold_low": 18, "p_gold_mid": 8, "p_gold_high": 3,
+        "min_buy_score": 5, "w_bounty_trait": 6, "w_bounty_layer": 6,
+        "w_lose_streak": 5, "w_hp_low": 2, "w_level_up": 7, "w_5cost": 6,
+        "refresh_budget_low_hp": 6, "refresh_budget_mid_hp": 14,
+        "refresh_budget_high_lv": 28, "refresh_budget_default": 36,
+    }},
+    "王者": {"mult": 1.75, "params": {
+        "skip_chance": 0.0, "prune_board": True, "counter_pick": True,
+        "smart_equip": True, "refresh_budget": 20, "level_reserve": 8,
+        "w_star2_pair": 140, "w_star2_single": 50, "w_star1_pair": 110,
+        "w_star1_single": 42, "w_base": 1, "w_trait_plan": 10,
+        "w_trait_owned": 3, "w_counter": 7, "w_cost": 1,
+        "p_gold_low": 20, "p_gold_mid": 9, "p_gold_high": 4,
+        "min_buy_score": 5, "w_bounty_trait": 7, "w_bounty_layer": 7,
+        "w_lose_streak": 5, "w_hp_low": 2, "w_level_up": 8, "w_5cost": 7,
+        "refresh_budget_low_hp": 5, "refresh_budget_mid_hp": 12,
+        "refresh_budget_high_lv": 25, "refresh_budget_default": 32,
+    }},
+}
+
+RANK_STATE = {"score": 0, "wins": 0, "losses": 0, "rank": "青铜"}
+
+
+def rank_from_score(score):
+    rank = "青铜"
+    for need, r in RANK_TABLE:
+        if score >= need:
+            rank = r
+    return rank
+
+
+def _rank_progress(score):
+    """返回 (当前段起始分, 当前段名, 下一段名或None, 下一段起始分或None, 进度0~1)。"""
+    cur_need, cur_rank = 0, RANK_TABLE[0][1]
+    nxt_need, nxt_rank = None, None
+    for need, r in RANK_TABLE:
+        if score >= need:
+            cur_need, cur_rank = need, r
+        else:
+            nxt_need, nxt_rank = need, r
+            break
+    if nxt_need is None:
+        return cur_need, cur_rank, None, None, 1.0
+    span = nxt_need - cur_need
+    prog = 0.0 if span <= 0 else min(1.0, (score - cur_need) / span)
+    return cur_need, cur_rank, nxt_rank, nxt_need, prog
+
+
+def _rank_save_path():
+    """排位存档优先使用脚本所在目录的绝对路径，
+    防止工作目录不同导致结算写入丢失（修复打完段位没变化/重启归零）。"""
+    base = os.path.dirname(get_script_path()) if get_script_path() else "."
+    return os.path.join(base, RANK_SAVE_FILE)
+
+
+def load_rank():
+    global RANK_STATE
+    data = None
+    # 先读新绝对路径，再兼容旧版相对路径存档（自动迁移，不丢历史战绩）
+    for path in (_rank_save_path(), RANK_SAVE_FILE):
+        try:
+            if os.path.exists(path):
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                break
+        except Exception as e:
+            log_once("load_rank", e)
+    if data:
+        for k in RANK_STATE:
+            if k in data:
+                RANK_STATE[k] = data[k]
+    RANK_STATE["rank"] = rank_from_score(RANK_STATE.get("score", 0))
+    return RANK_STATE
+
+
+def save_rank():
+    try:
+        with open(_rank_save_path(), "w", encoding="utf-8") as f:
+            json.dump(RANK_STATE, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        log_once("save_rank", e)
+        return False
+
+
+def rank_ai_mult(rank_name):
+    return RANK_AI_MULT.get(rank_name, 1.0)
+
+
+def _settle_rank_match(gs, rank_mode):
+    """排位结算：胜利加分、失败扣分（青铜保底不清零），升/降段并存档。
+    分数按【玩家段位 vs 对手真实段位】缩放：
+    对手低于玩家（虚高保护）→ 赢少加输多扣；同段位 → 标准±20/10；
+    对手更高 → 赢多加输少扣。"""
+    won = gs.game_over_text == "胜利!"
+    old_rank = rank_from_score(RANK_STATE.get("score", 0))
+    p_rank = old_rank
+    opp_rank = getattr(gs, "_opp_rank", None) or p_rank
+    try:
+        idx_p = RANK_ORDER_LIST.index(p_rank)
+        idx_o = RANK_ORDER_LIST.index(opp_rank)
+    except ValueError:
+        idx_p = idx_o = 0
+    if idx_o < idx_p:
+        # 对手段位低于玩家：赢分减半、输分多扣50%，防止段位虚高
+        win_pts = max(1, int(RANK_WIN_PTS * 0.5))
+        lose_pts = RANK_LOSE_PTS + int(RANK_LOSE_PTS * 0.5)
+    elif idx_o > idx_p:
+        # 对手段位更高：赢分多50%、输分减半，鼓励越级挑战
+        win_pts = RANK_WIN_PTS + int(RANK_WIN_PTS * 0.5)
+        lose_pts = max(1, int(RANK_LOSE_PTS * 0.5))
+    else:
+        win_pts, lose_pts = RANK_WIN_PTS, RANK_LOSE_PTS
+    if won:
+        RANK_STATE["score"] = RANK_STATE.get("score", 0) + win_pts
+        RANK_STATE["wins"] = RANK_STATE.get("wins", 0) + 1
+        pts = win_pts
+    else:
+        RANK_STATE["score"] = max(0, RANK_STATE.get("score", 0) - lose_pts)
+        RANK_STATE["losses"] = RANK_STATE.get("losses", 0) + 1
+        pts = -lose_pts
+    new_rank = rank_from_score(RANK_STATE["score"])
+    RANK_STATE["rank"] = new_rank
+    save_rank()
+    settle = (f"排位结算: {'胜利' if won else '失败'} {pts:+d}分 · "
+              f"对手{opp_rank}AI · {old_rank} → {new_rank} · 总分 {RANK_STATE['score']}")
+    gs.rank_settle_text = settle
+    gs.battle_log = settle
+    gs.battle_log_history.append(settle)
+
+
+# 启动时读取排位存档
+try:
+    load_rank()
+except Exception:
+    pass
+
+
+# ============================================================
+#  AI 段位体系：按评估平均分自动分档，分档存档
+# ============================================================
+AI_RANK_THRESHOLDS = [
+    ("青铜", 80.0), ("白银", 110.0), ("黄金", 150.0), ("铂金", 200.0),
+    ("钻石", 260.0), ("大师", 320.0), ("宗师", 390.0), ("王者", 460.0),
+]
+AI_RANK_FILES = {
+    "青铜": "ai_bronze.json", "白银": "ai_silver.json",
+    "黄金": "ai_gold.json", "铂金": "ai_platinum.json",
+    "钻石": "ai_diamond.json", "大师": "ai_master.json",
+    "宗师": "ai_grandmaster.json", "王者": "ai_king.json",
+}
+
+
+def _ai_rank_from_score(score):
+    """按评估平均分给AI分段位：青铜最低，王者最高。"""
+    rank = "青铜"
+    for r, need in AI_RANK_THRESHOLDS:
+        if score >= need:
+            rank = r
+    return rank
+
+
+def _save_ranked_ai(rank, params, score):
+    """把某段位AI存档。同段位只保留更高分，弱的不会覆盖强的。"""
+    fname = AI_RANK_FILES.get(rank)
+    if fname is None:
+        return False
+    try:
+        old = None
+        if os.path.exists(fname):
+            with open(fname, "r", encoding="utf-8") as f:
+                old = json.load(f)
+        if old is not None and old.get("score", 0.0) >= score:
+            return False
+        with open(fname, "w", encoding="utf-8") as f:
+            json.dump({"rank": rank, "score": score, "params": params},
+                      f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        log_once("save_ranked_ai", e)
+        return False
+
+
+def _load_ranked_ai(rank):
+    """读取某段位AI，返回 (params, score, mult, source)。
+    优先本地 ai_xxx.json（用户离线训练覆盖，更强则生效）；
+    本地缺失使用源码内置段位池（分发自带，下载即用）；
+    source ∈ {"local", "builtin", "missing"}。"""
+    fname = AI_RANK_FILES.get(rank)
+    builtin = BUILTIN_RANKED_AI_POOL.get(rank)
+    builtin_params = dict(builtin["params"]) if builtin else dict(EXTREME_AI_PARAMS)
+    builtin_mult = builtin["mult"] if builtin else rank_ai_mult(rank)
+    if fname is not None:
+        try:
+            if os.path.exists(fname):
+                with open(fname, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if data.get("params"):
+                    merged = dict(builtin_params)
+                    for k, v in data["params"].items():
+                        if k in merged:
+                            merged[k] = v
+                    return merged, float(data.get("score", 0.0)), \
+                        builtin_mult, "local"
+        except Exception as e:
+            log_once("load_ranked_ai", e)
+    if builtin is not None:
+        return builtin_params, 0.0, builtin_mult, "builtin"
+    return None, 0.0, rank_ai_mult(rank), "missing"
+
+
+def _ranked_opponent_ai(player_rank):
+    """排位对手AI匹配：同段位本地训练存档优先 → 内置出厂段位池兜底 →
+    异常时向下借已存在段位 → 全局最强极限AI最终兜底。
+    返回 (参数, 难度系数, 来源文案, 对手真实段位)。"""
+    params, score, mult, source = _load_ranked_ai(player_rank)
+    if source == "local":
+        return params, mult, f"{player_rank}段位AI（训练存档 {score:.0f}分）", \
+            player_rank
+    if source == "builtin":
+        return params, mult, f"{player_rank}段位AI（内置出厂梯度·千局校准）", \
+            player_rank
+    # 防御兜底：向下找已存在段位，避免玩家段位虚高无对手
+    try:
+        idx = RANK_ORDER_LIST.index(player_rank)
+    except ValueError:
+        idx = 0
+    for i in range(idx - 1, -1, -1):
+        r = RANK_ORDER_LIST[i]
+        p2, s2, m2, src2 = _load_ranked_ai(r)
+        if src2 != "missing":
+            return p2, m2, f"未找到{player_rank}段位AI，下借{r}段位AI（{src2}）", r
+    return dict(EXTREME_AI_PARAMS), rank_ai_mult("王者"), \
+        "未找到任何段位AI，使用全局最强极限AI替补", "王者"
+
+
+# ============================================================
+#  玩家对局信息提取：训练时利用你的对局数据继续学习
+#  （提取强度/节奏等统计特征生成参考对手，不是复刻你的操作）
+# ============================================================
+PLAYER_HISTORY_FILE = "player_history.json"
+PLAYER_HISTORY_MAX = 50
+
+
+def _count_stars(player):
+    s = 0
+    for row in player["board"]:
+        for u in row:
+            if u:
+                s += u.get("star", 1)
+    for u in player["bench"]:
+        if u:
+            s += u.get("star", 1)
+    return s
+
+
+def _count_units(player):
+    n = 0
+    for row in player["board"]:
+        for u in row:
+            if u:
+                n += 1
+    for u in player["bench"]:
+        if u:
+            n += 1
+    return n
+
+
+def _count_items(player):
+    n = len(player.get("items", []))
+    for row in player["board"]:
+        for u in row:
+            if u:
+                n += len(u.get("items", []))
+    for u in player["bench"]:
+        if u:
+            n += len(u.get("items", []))
+    return n
+
+
+def _player_strength_mult(rec):
+    """玩家对局记录 → 玩家风格对手的难度系数（0.7~1.75）。"""
+    score = 40.0
+    if rec.get("won"):
+        score += 45.0
+    score += min(rec.get("hp", 0), 100) * 0.1
+    score += rec.get("level", 1) * 3.0
+    score += rec.get("stars", 0) * 2.0
+    score += min(rec.get("units", 0), 28) * 1.0
+    mult = 0.7 + (score - 40.0) * 0.015
+    return max(0.7, min(1.75, mult))
+
+
+def _record_player_game(gs, mode):
+    """提取玩家每局的行为统计（普通/排位/联机都记），
+    供训练阶段3生成基于玩家数据的参考对手。"""
+    me = gs.me
+    won = gs.game_over_text == "胜利!"
+    record = {
+        "time": int(time.time()),
+        "mode": mode,
+        "won": won,
+        "rounds": gs.round_counter,
+        "gold": me.get("gold", 0),
+        "hp": me.get("hp", 0),
+        "level": me.get("level", 1),
+        "stars": _count_stars(me),
+        "units": _count_units(me),
+        "items": _count_items(me),
+        "streak": me.get("win_streak", 0) + me.get("lose_streak", 0),
+    }
+    record["strength_mult"] = _player_strength_mult(record)
+    try:
+        hist = []
+        if os.path.exists(PLAYER_HISTORY_FILE):
+            with open(PLAYER_HISTORY_FILE, "r", encoding="utf-8") as f:
+                hist = json.load(f)
+        if not isinstance(hist, list):
+            hist = []
+        hist.append(record)
+        if len(hist) > PLAYER_HISTORY_MAX:
+            hist = hist[-PLAYER_HISTORY_MAX:]
+        with open(PLAYER_HISTORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(hist, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        log_once("record_player_game", e)
+        return False
+
+
+def _load_player_history():
+    try:
+        if not os.path.exists(PLAYER_HISTORY_FILE):
+            return []
+        with open(PLAYER_HISTORY_FILE, "r", encoding="utf-8") as f:
+            hist = json.load(f)
+        return hist if isinstance(hist, list) else []
+    except Exception as e:
+        log_once("load_player_history", e)
+        return []
+
+
+def _make_player_data_opponent():
+    """从玩家历史对局随机抽一条，提取其统计信息（强度系数/人口/星级/规模）
+    生成一个参考对手，AI 借这类对手继续学习。
+    强度系数按你该局的表现推算，行为档次随强度变化。"""
+    hist = _load_player_history()
+    if not hist:
+        return None
+    rec = random.choice(hist)
+    p = create_empty_player(gold=0, is_ai=True,
+                            difficulty_mult=rec.get("strength_mult", 1.0))
+    p["_from_player_data"] = True
+    p["_player_info"] = {k: rec.get(k) for k in
+                         ("mode", "won", "level", "stars", "units")}
+    return p
+
+
+def _sim_battle_strength(player):
+    """无渲染战力估算：cost * 3^(star-1) * 装备加成。"""
+    total = 0.0
+    for row in player.get("board", []):
+        for u in row:
+            if u is None:
+                continue
+            cost = u.get("cost", 1)
+            star = u.get("star", 1)
+            item_bonus = 1.0 + 0.12 * len(u.get("items", []))
+            total += cost * (3 ** (star - 1)) * item_bonus
+    return total
+
+
+def _sim_bounty_round(p):
+    """模拟器内的财宝猎人简化模拟：
+    Treasure≥3 时按胜负积累藏宝碎片，满10升1层；到上限自动收菜发金币并重置。"""
+    tc = count_traits(p).get("Treasure", 0)
+    if tc < 3:
+        return
+    max_layer = 9 if tc >= 8 else 8
+    layer = p.get("_bounty_layer", 1)
+    if layer >= max_layer:
+        # 到上限自动收菜：按层数发金币（高层=高级菜，奖励更丰厚）
+        p["gold"] = p.get("gold", 0) + layer * 6
+        p["_bounty_layer"] = 1
+        p["_bounty_shards"] = 0
+        return
+    won = p.get("win_streak", 0) > 0
+    gain = _bounty_gain(tc, won)
+    if gain <= 0:
+        return
+    shards = p.get("_bounty_shards", 0) + gain
+    while shards >= 10 and layer < max_layer:
+        shards -= 10
+        layer += 1
+    p["_bounty_shards"] = shards
+    p["_bounty_layer"] = layer
+
+
+def _sim_run_one_game(players, max_rounds=35):
+    """无渲染跑一局；返回按排名（高到低）排列的玩家列表。"""
+    init_pool()
+    stage, rnd = 1, 2
+    while max_rounds > 0:
+        alive = [p for p in players if p["hp"] > 0]
+        if len(alive) <= 1:
+            break
+        # AI 运营
+        for p in players:
+            if p["hp"] <= 0:
+                continue
+            try:
+                ai_do_turn(p, players)
+            except Exception:
+                pass
+        # 战力配对
+        alive = [p for p in players if p["hp"] > 0]
+        random.shuffle(alive)
+        i = 0
+        while i + 1 < len(alive):
+            a, b = alive[i], alive[i + 1]
+            sa = _sim_battle_strength(a)
+            sb = _sim_battle_strength(b)
+            if sa >= sb:
+                loser, winner = b, a
+            else:
+                loser, winner = a, b
+            # 估算输方掉血：5 + 存活单位数
+            survivors = sum(1 for row in winner["board"] for u in row if u)
+            dmg = 5 + random.randint(0, 3) + survivors
+            loser["hp"] -= dmg
+            winner["win_streak"] += 1
+            winner["lose_streak"] = 0
+            loser["lose_streak"] += 1
+            loser["win_streak"] = 0
+            i += 2
+        # 回合结束：发钱发经验
+        for p in players:
+            if p["hp"] > 0:
+                apply_income_and_xp(p)
+        # 财宝猎人简化模拟：碎片→层数→到上限自动收菜
+        for p in players:
+            if p["hp"] > 0:
+                _sim_bounty_round(p)
+        # 推进阶段
+        if stage == 1:
+            if rnd < STAGE1_ROUNDS:
+                rnd += 1
+            else:
+                stage, rnd = 2, 1
+        else:
+            if rnd < STAGE_NORMAL_ROUNDS:
+                rnd += 1
+            else:
+                stage, rnd = stage + 1, 1
+        max_rounds -= 1
+    # 排名：hp 优先，其次等级，再次战力
+    def _rank_key(p):
+        return (p["hp"], p.get("level", 1), _sim_battle_strength(p))
+    return sorted(players, key=_rank_key, reverse=True)
+
+
+def _sim_evaluate_params(params, games=10):
+    """按当前课程阶段挑对手评估极限 AI：
+    阶段1=打普通AI；阶段2=打困难AI；阶段3=打基础对手+快照池。
+    返回 (平均分, 胜率)。"""
+    global EXTREME_AI_PARAMS
+    saved = dict(EXTREME_AI_PARAMS)
+    EXTREME_AI_PARAMS = dict(params)
+    total_score = 0.0
+    wins = 0
+    phase = _TRAINING_STATE.get("phase", 1)
+    try:
+        for _ in range(games):
+            players = []
+            for i in range(8):
+                if i == 0:
+                    p = create_empty_player(gold=0, is_ai=True,
+                                             difficulty_mult=1.6)  # 极限
+                else:
+                    p = _make_curriculum_opponent(phase)
+                one_cost = [c for c in CHAMPION_LIST
+                            if c["cost"] == 1 and not c.get("no_shop")]
+                if one_cost:
+                    c = random.choice(one_cost)
+                    u = make_unit_with_star(c["name"], 1)
+                    if u:
+                        p["bench"][0] = u
+                players.append(p)
+            ranked = _sim_run_one_game(players)
+            rank_idx = ranked.index(players[0])
+            if rank_idx == 0:
+                wins += 1
+                total_score += 100
+            elif rank_idx == 1:
+                total_score += 60
+            elif rank_idx == 2:
+                total_score += 30
+            elif rank_idx == 3:
+                total_score += 10
+            # 额外按极限 AI 的最终血量加分
+            total_score += max(0, players[0]["hp"]) * 0.5
+    finally:
+        EXTREME_AI_PARAMS = saved
+    return total_score / max(1, games), wins / max(1, games)
+
+
+def _mutate_params(base, intensity=0.15, big_mutation=False):
+    """在 base 参数上做随机扰动，返回新字典。布尔字段不扰动。
+    big_mutation=True 时只随机挑少量(≤3)字段大幅重置、其余字段照常小扰动：
+    既保留对局部极值的爬坡能力，又保留探索全新策略的空间，
+    避免把整个候选全盘打乱成随机垃圾（旧实现导致停滞期永远追不上历史最优）。"""
+    new_p = dict(base)
+    heavy = set()
+    if big_mutation:
+        numeric_keys = [k for k, v in base.items() if not isinstance(v, bool)]
+        if numeric_keys:
+            heavy = set(random.sample(numeric_keys, min(3, len(numeric_keys))))
+    for k, v in base.items():
+        if isinstance(v, bool):
+            continue
+        if k in heavy:
+            # 大变异：仅对选中的少数字段大幅扰动，强行探索新思路
+            if isinstance(v, float):
+                if v == 0:
+                    new_p[k] = random.uniform(-0.05, 0.5)
+                else:
+                    new_p[k] = v + random.uniform(-abs(v) * 0.8, abs(v) * 0.8)
+            elif isinstance(v, int):
+                if v == 0:
+                    new_p[k] = random.randint(0, 12)
+                else:
+                    new_p[k] = v + random.randint(
+                        -int(abs(v) * 0.8), int(abs(v) * 0.8))
+            else:
+                continue
+        elif isinstance(v, float):
+            delta = max(0.01, abs(v) * intensity)
+            new_p[k] = v + random.uniform(-delta, delta)
+        elif isinstance(v, int):
+            delta = max(1, int(abs(v) * intensity))
+            new_p[k] = v + random.randint(-delta, delta)
+        else:
+            continue
+        # 边界保护
+        if k == "skip_chance":
+            new_p[k] = max(0.0, min(0.5, float(new_p[k])))
+        elif k.startswith("w_") or k.startswith("p_"):
+            new_p[k] = max(0, new_p[k])
+        elif k.startswith("refresh_budget"):
+            new_p[k] = max(5, min(80, new_p[k]))
+        elif k.startswith("level_reserve"):
+            new_p[k] = max(0, min(30, new_p[k]))
+    return new_p
+
+
+def _shuffle_opponent_pool():
+    """停滞过久时打乱对手池：淘汰随机旧对手，补充大幅变异的新对手。"""
+    pool = EXTREME_AI_SNAPSHOT_POOL
+    if not pool:
+        return
+    remove_n = min(2, max(1, len(pool) // 2))
+    for _ in range(remove_n):
+        pool.pop(random.randrange(len(pool)))
+    for _ in range(remove_n):
+        pool.append(dict(_mutate_params(dict(EXTREME_AI_PARAMS),
+                                        intensity=0.3, big_mutation=True)))
+    st = _TRAINING_STATE
+    st["pool_size"] = len(pool) + len(EXTREME_AI_OPPONENT_POOL)
+    st["rank"] = _rank_from_pool(st["pool_size"])
+    st["log"].append("停滞超限，打乱对手池，补充变异新对手")
+
+
 def ai_try_combine(target_player):
-    for _ in range(20):
+    """三合一升星：扫描棋盘+备战席，凑齐3个同名同星就升1星。"""
+    while True:
         groups = {}
         for r, row in enumerate(target_player["board"]):
             for c, unit in enumerate(row):
@@ -3435,6 +4568,190 @@ def ai_try_combine(target_player):
             break
         if not combined:
             break
+
+
+def evolve_extreme_ai_offline(population=12, games_per_variant=6,
+                              generations=None, stop_event=None,
+                              phase_thresholds=None):
+    """离线进化：可无限运行。每代取最优保存；跨阶段不倒退。
+    generations=None 表示无限跑，靠 stop_event 停止。
+    阶段1达标升阶段2（打困难），阶段2达标升阶段3（自我对弈+快照池）。
+    突破就写盘，中途关掉也不丢成果。"""
+    global EXTREME_AI_PARAMS
+    if phase_thresholds is None:
+        phase_thresholds = {1: 110.0, 2: 130.0}
+    st = _TRAINING_STATE
+    st.setdefault("phase", 1)
+    st.setdefault("phase_label", "普通")
+    st.setdefault("rank", "青铜")
+    st.setdefault("pool_size", len(EXTREME_AI_OPPONENT_POOL))
+    st.setdefault("no_breakthrough_gens", 0)
+    prog = _load_training_progress()
+    if prog and prog.get("best_params"):
+        # 老存档补默认键，保证新特征权重也能被进化调整
+        base = dict(EXTREME_AI_PARAMS_DEFAULT)
+        base.update({k: v for k, v in prog["best_params"].items()
+                     if k in base})
+        gen = int(prog.get("generation", 0))
+        best_score = float(prog.get("best_score", 0.0))
+        best_params = dict(base)
+        EXTREME_AI_PARAMS = dict(best_params)
+        st["phase"] = int(prog.get("phase", 1))
+        st["phase_label"] = prog.get("phase_label", "普通")
+        st["no_breakthrough_gens"] = int(prog.get("no_breakthrough_gens", 0))
+        EXTREME_AI_SNAPSHOT_POOL[:] = [dict(x) for x in prog.get("snapshot_pool", [])]
+        st["best_params"] = dict(best_params)
+        st["best_score"] = best_score
+        st["pool_size"] = len(EXTREME_AI_SNAPSHOT_POOL) + len(EXTREME_AI_OPPONENT_POOL)
+        st["rank"] = _rank_from_pool(st["pool_size"])
+        st["log"].append(
+            f"恢复上次进度 · 第 {gen} 代 · 阶段{st['phase_label']} · "
+            f"最优 {best_score:.1f}")
+    else:
+        base = dict(EXTREME_AI_PARAMS)
+        gen = 0
+        best_score = -1.0
+        best_params = dict(base)
+        st["best_params"] = dict(best_params)
+        st["best_score"] = 0.0
+    while True:
+        if stop_event is not None and stop_event.is_set():
+            break
+        if generations is not None and gen >= generations:
+            break
+        gen += 1
+        st["generation"] = gen
+        stalled = st.get("no_breakthrough_gens", 0)
+        big_mode = stalled >= 15
+        if big_mode and not st.get("_big_mode_logged"):
+            st["_big_mode_logged"] = True
+            st["log"].append("停滞超限，自动开启增强变异模式（大变异探索新策略）")
+        elif not big_mode and st.get("_big_mode_logged"):
+            st["_big_mode_logged"] = False
+            st["log"].append("突破成功，恢复标准变异模式")
+        intensity = 0.3 if big_mode else 0.15
+        # 候选池构成：
+        #   1) 精英个体 = 历史最优参数，不重评估、直接继承分数（消除评估方差对停滞计数的污染）
+        #   2) 小变异个体（标准扰动，负责对局部极值爬坡）
+        #   3) 大变异个体（仅少量字段大幅扰动，负责探索新策略，不会把候选搅成随机垃圾）
+        n_big = 4 if big_mode else 2
+        candidates = [("elite", dict(best_params))]
+        for i in range(max(1, population - 1)):
+            candidates.append(
+                ("mut", _mutate_params(best_params, intensity=intensity,
+                                       big_mutation=(i < n_big))))
+        gen_best = -1.0
+        gen_best_params = None
+        for idx, (kind, cand) in enumerate(candidates):
+            if stop_event is not None and stop_event.is_set():
+                break
+            st["current_variant"] = idx + 1
+            st["current_population"] = len(candidates)
+            st["current_games_per_variant"] = games_per_variant
+            if kind == "elite":
+                score = best_score
+            else:
+                score, _wr = _sim_evaluate_params(cand, games=games_per_variant)
+            st["current_score"] = score
+            # 前台在打对局时：每评估完一个候选让出CPU片刻，保证游玩流畅
+            if _TRAINING_GIVE_WAY:
+                time.sleep(0.01)
+            if kind != "elite" and score > gen_best:
+                gen_best = score
+                gen_best_params = cand
+        if gen_best_params is None:
+            continue
+        st["gen_best"] = gen_best
+        breakthrough = gen_best > best_score + 1.0
+        if breakthrough:
+            # 突破复核：候选再评估一轮取平均，仍超阈值才接受（过滤单局运气）
+            confirm_score, _ = _sim_evaluate_params(gen_best_params,
+                                                    games=games_per_variant)
+            final_score = (gen_best + confirm_score) / 2.0
+            if final_score > best_score + 1.0:
+                gen_best = final_score
+                st["gen_best"] = final_score
+            else:
+                # 复核未达标：单局高分是运气，不采纳。日志讲清楚原因，避免误解
+                breakthrough = False
+                st["log"].append(
+                    f"第{gen}代 · 突破复核未达标：单局{gen_best:.1f} "
+                    f"复核均值{confirm_score:.1f}（需>{best_score+1.0:.1f}）· "
+                    f"判定为单局运气，不更新全局最优")
+        if breakthrough:
+            best_score = gen_best
+            best_params = dict(gen_best_params)
+            EXTREME_AI_PARAMS = dict(best_params)
+            save_extreme_params()
+            # 自动固化：把新的全局最优AI直接写进豹药宇宙.py源码（带.bak备份），
+            # 复制脚本到别的电脑无需带json也能用这个最强AI
+            _overwrite_builtin_ai_in_source(best_params)
+            st["best_params"] = dict(best_params)
+            st["best_score"] = best_score
+            st["no_breakthrough_gens"] = 0
+            st["_last_shuffle_gens"] = 0
+        else:
+            st["no_breakthrough_gens"] = st.get("no_breakthrough_gens", 0) + 1
+            # 停滞≥30代：打乱对手池，增加对抗多样性
+            if (st["no_breakthrough_gens"] >= 30
+                    and st["no_breakthrough_gens"] - st.get("_last_shuffle_gens", 0) >= 30
+                    and st.get("phase", 1) >= 3):
+                _shuffle_opponent_pool()
+                st["_last_shuffle_gens"] = st["no_breakthrough_gens"]
+        # 阶段看的是当前最优分，和是否突破无关，避免一步跳穿阈值卡在旧阶段
+        prev_phase = st.get("phase", 1)
+        _advance_phase_if_ready(best_score, phase_thresholds)
+        # 进入阶段3即录入首个快照；此后阶段3内每次突破也录入
+        if (breakthrough or prev_phase < 3) and st.get("phase", 1) >= 3:
+            _record_snapshot(best_params)
+        # 按本代最强分数给AI分档存档（同段位只保留更高分）
+        g_rank = _ai_rank_from_score(gen_best)
+        if _save_ranked_ai(g_rank, dict(gen_best_params), gen_best):
+            # 新段位/新高分AI诞生：自动进入对手池（上限30淘汰最旧）
+            _record_snapshot(gen_best_params)
+        b_rank = _ai_rank_from_score(best_score)
+        # 日志把【本代最优】放在最前，避免被界面截断看不到当代成绩
+        log = (f"第 {gen} 代 · 本代 {gen_best:.1f}({g_rank}AI) · "
+               f"全局最优 {best_score:.1f}({b_rank}AI) · "
+               f"训练段位 {st.get('rank', '青铜')} · 阶段{st.get('phase', 1)}")
+        st["log"].append(log)
+        if len(st["log"]) > 200:
+            del st["log"][:-200]
+        # 写盘防抖：每5代保存一次进度，降低磁盘IO卡顿（停止训练时由worker兜底强制保存）
+        if gen % 5 == 0:
+            _save_training_progress()
+    return best_params
+
+
+def _training_worker(stop_event):
+    """训练线程入口，可被 stop_event 打断。"""
+    _TRAINING_STATE["running"] = True
+    try:
+        evolve_extreme_ai_offline(
+            population=12,
+            games_per_variant=6,
+            stop_event=stop_event,
+        )
+    except Exception as e:
+        log_once("training_worker", e)
+    finally:
+        _TRAINING_STATE["running"] = False
+        _save_training_progress()
+
+
+def _check_training_worker():
+    """检测训练线程是否真的还活着。
+    界面显示“训练中”但线程已死（后台被系统挂起/异常退出）时，
+    自动把状态重置为可重新开始，避免永远卡在“训练中”没法点开始。"""
+    if not _TRAINING_STATE.get("running", False):
+        return
+    wt = _TRAINING_STATE.get("worker_thread")
+    if wt is None:
+        return
+    if not wt.is_alive():
+        _TRAINING_STATE["running"] = False
+        _TRAINING_STATE["log"].append(
+            "训练线程已中断（后台挂起/异常退出），可重新点开始继续")
 
 
 class BattleUnit:
@@ -3928,17 +5245,8 @@ class BattleUnit:
             if dist > MIN_MOVE_DIST:
                 self.x += dx / dist * self.move_speed * dt
                 self.y += dy / dist * self.move_speed * dt
-        elif self.is_ranged and dist < RANGED_KEEP_DIST:
-            self.state = "moving"
-            self.attack_target = nearest
-            dx_from_start = self.x - self.start_x
-            dy_from_start = self.y - self.start_y
-            back_dist = (dx_from_start ** 2 + dy_from_start ** 2) ** 0.5
-            if back_dist < RANGED_BACKOFF_LIMIT and dist > MIN_MOVE_DIST:
-
-                self.x -= dx / dist * self.move_speed * RANGED_BACKOFF_SPEED * dt
-                self.y -= dy / dist * self.move_speed * RANGED_BACKOFF_SPEED * dt
         else:
+            # 进入攻击范围后站桩输出：远程单位不再后撤（修复“后排往后走”）
             self.state = "attack"
             self.attack_target = nearest
             if self.attack_cd_remain <= 0:
@@ -4288,11 +5596,22 @@ class BattleInstance:
         rows, cols = 4, 7
         pad_x = screen_w * 0.04
         cell_w = (screen_w - 2 * pad_x) / cols
-        size = max(38, int(cell_w * 0.80))
+        
+        # 强制战斗区域限制在屏幕高度的 10% 到 90% 之间
+        battle_top = screen_h * 0.10
+        battle_bottom = screen_h * 0.90
+        battle_height = battle_bottom - battle_top
+        row_h = battle_height / 8  # 上下半场各 4 排，共 8 排
+        
+        # 单位大小同时受宽度和高度限制，实现等比缩放
+        size = max(28, int(min(cell_w * 0.75, row_h * 0.85)))
+        
         if side == "ally":
-            y_front, y_back = screen_h * 0.54, screen_h * 0.90
+            y_front = battle_bottom - row_h * 3.5  # 己方前排在下方
+            y_back = battle_bottom
         else:
-            y_front, y_back = screen_h * 0.46, screen_h * 0.10
+            y_front = battle_top + row_h * 3.5     # 敌方前排在上方
+            y_back = battle_top
         y_step = (y_back - y_front) / max(1, rows - 1)
         board = player["board"]
         for r in range(rows):
@@ -4398,8 +5717,7 @@ class GameState:
 
         ai_mult = DIFFICULTY_MULT.get(difficulty, 1.0)
         self.me = create_empty_player(gold=START_GOLD_PLAYER, is_ai=False)
-        # 巨斧选择器：物品栏常驻特殊道具，不消耗，可反复使用
-        self.me.setdefault("items", []).append(make_special_item("giant_axe"))
+        # 巨斧选择器不再开局无条件发放：改为玩家首次拥有伐木棋子时自动补发
         if self.is_multiplayer:
             self.players = []
             self.me["gold"] = 30
@@ -4437,6 +5755,8 @@ class GameState:
         self._battle_ally_hit_rects = []
         self._trait_scroll = 0
         self._trait_max_scroll = 0
+        self._trait_drag_start = None
+        self._trait_popup_rect = None
         self.mouse_down_pos = (0, 0)
         self.battle_result_timer = 0.0
         self.battle_result_text = ""
@@ -4659,6 +5979,7 @@ class GameState:
         play_sfx("buy")
         self.try_combine(self.me)
         self.battle_log = f"已购买 {champ_cn(champ['name'])} (备战席 {empty_idx+1})"
+        self.sync_lumber_marks()
         save_game(self)
 
     def sell_unit_at(self, source_type, i1, i2=-1):
@@ -4706,9 +6027,18 @@ class GameState:
         return True, refund
 
     def sync_lumber_marks(self):
-        """伐木羁绊计数<3时，清空全部巨斧首领标记（跨回合持久，仅两种条件清除之一）。"""
+        """只有激活 3 伐木（或以上）羁绊才发放/保留巨斧选择器。
+        未激活时回收巨斧并清空全部首领标记。"""
         p = self.me
-        if get_lumber_tier(p) == 0:
+        items = p.setdefault("items", [])
+        has_axe = any(it.get("special_kind") == "giant_axe" for it in items)
+        if get_lumber_tier(p) > 0:
+            if not has_axe:
+                items.append(make_special_item("giant_axe"))
+        else:
+            if has_axe:
+                p["items"] = [it for it in items
+                              if it.get("special_kind") != "giant_axe"]
             for row in p["board"]:
                 for u in row:
                     if u is not None:
@@ -5108,10 +6438,9 @@ class GameState:
                         f"{champ_cn(unit['name'])} 已装备「{trait_cn(trait)}」转职，不能重复装备")
                     self._toast_msg("同一转职不能重复装备")
                     return False
-        # 神器(is_artifact)应像普通成装一样装备到棋子身上，
-        # 由战斗逻辑从棋子 items 里读取；不能走 use_special_item 消耗掉。
-        if item.get("is_special") and not item.get("is_emblem") and not item.get("is_artifact"):
-            # 特殊道具拖到棋子上即执行；普通装备/纹章才真正挂到棋子装备栏。
+        # 兜底校验：消耗型道具(拆卸器/昊天锤/法球等)不允许装配到棋子装备栏，
+        # 拖到棋子上即执行 use_special_item；纹章/神器/普通装备/灵符才真正挂装。
+        if not is_wearable_item(item):
             return self.use_special_item(item, unit, source_type)
         # 满编判断：若已达3件，只有当拖入散件能与已有散件合成(件数不超上限)时才允许
         if len(unit.get("items", [])) >= MAX_ITEMS_PER_UNIT:
@@ -5203,8 +6532,8 @@ class GameState:
                 ai_do_turn(ai_p, all_players)
         
         auto_fill_board(self.me)
-        
-        self.refresh_shop()
+        # 修复：开战瞬间不再强制刷新商店（锁定商店/刚选好的棋保留），
+        # 商店刷新统一在战斗结束后的下一轮备战开始时进行
         if round_type == "monster":
             self._start_monster_round()
             return
@@ -5416,29 +6745,46 @@ class GameState:
 
         if self.is_multiplayer:
             pb = self.player_battle()
+            round_type = get_round_type(stage, rnd)
             if pb:
-                if pb.winner == 'attacker':
-                    survivors = len([u for u in pb.allies if u.alive])
-                    self.battle_log = f"胜利！存活 {survivors}"
-                    self.battle_result_text = "胜利"
-                    self.battle_result_color = GOLD_COLOR
-                    self.me["win_streak"] += 1
-                    self.me["lose_streak"] = 0
-                elif pb.winner == 'defender':
-                    survivors = len([u for u in pb.enemies if u.alive])
-                    dmg = 5 + survivors * 2
-                    self.me["hp"] = max(0, self.me["hp"] - dmg)
-                    self.battle_log = f"失败！-{dmg} HP"
-                    self.battle_result_text = f"失败 -{dmg}"
-                    self.battle_result_color = RED
-                    self.me["lose_streak"] += 1
-                    self.me["win_streak"] = 0
+                if round_type == "monster":
+                    # 联机野怪回合：胜利掉装备/钱，失败按野怪规则扣血；不计连胜连败
+                    if pb.winner == 'defender':
+                        survivors = len([u for u in pb.enemies if u.alive])
+                        dmg = compute_player_damage(stage, survivors)
+                        self.me["hp"] = max(0, self.me["hp"] - dmg)
+                        self.battle_log = f"野怪失败! 承受 {dmg} 伤害"
+                        self.battle_result_text = f"失败 -{dmg}"
+                        self.battle_result_color = RED
+                    else:
+                        self.battle_log = "野怪胜利!"
+                        self.battle_result_text = "胜利!"
+                        self.battle_result_color = GOLD_COLOR
+                        play_sfx("victory")
+                        self._monster_drop(stage, rnd)
                 else:
-                    self.battle_log = "平局"
-                    self.battle_result_text = "平局"
-                    self.battle_result_color = GOLD_COLOR
-                    self.me["win_streak"] = 0
-                    self.me["lose_streak"] = 0
+                    if pb.winner == 'attacker':
+                        survivors = len([u for u in pb.allies if u.alive])
+                        self.battle_log = f"胜利！存活 {survivors}"
+                        self.battle_result_text = "胜利"
+                        self.battle_result_color = GOLD_COLOR
+                        self.me["win_streak"] += 1
+                        self.me["lose_streak"] = 0
+                    elif pb.winner == 'defender':
+                        survivors = len([u for u in pb.enemies if u.alive])
+                        dmg = 5 + survivors * 2
+                        self.me["hp"] = max(0, self.me["hp"] - dmg)
+                        self.battle_log = f"失败！-{dmg} HP"
+                        self.battle_result_text = f"失败 -{dmg}"
+                        self.battle_result_color = RED
+                        self.me["lose_streak"] += 1
+                        self.me["win_streak"] = 0
+                    else:
+                        self.battle_log = "平局"
+                        self.battle_result_text = "平局"
+                        self.battle_result_color = GOLD_COLOR
+                        self.me["win_streak"] = 0
+                        self.me["lose_streak"] = 0
                 self.battle_result_timer = 2.0
                 if self.net and self.net.connected:
                     self.net.send({
@@ -5530,8 +6876,8 @@ class GameState:
         gold_drop = random.randint(2, 4) + stage
         self.me["gold"] += gold_drop
         drops.append(f"+{gold_drop} 金")
-        # 2-1 野怪回合100%掉落装备拆卸器（物品栏满则暂存溢出仓库，稍后自动回栏）
-        if stage == 2 and rnd == 1:
+        # 1-2 野怪回合100%掉落装备拆卸器（物品栏满则暂存溢出仓库，稍后自动回栏）
+        if stage == 1 and rnd == 2:
             if len(self.me["items"]) < MAX_ITEM_BENCH:
                 self.me["items"].append(make_special_item("disassembler"))
             else:
@@ -5586,6 +6932,14 @@ class GameState:
                 continue
             ai_gold = random.randint(2, 4) + stage
             ai["gold"] += ai_gold
+            # 1-2 野怪回合：AI 也发一个装备拆卸器（金铲铲对标）
+            if stage == 1 and rnd == 2:
+                if len(ai.get("items", [])) < MAX_ITEM_BENCH:
+                    ai.setdefault("items", []).append(
+                        make_special_item("disassembler"))
+                else:
+                    ai.setdefault("free_item_store", []).append(
+                        make_special_item("disassembler"))
             for _ in range(drop_count):
                 if len(ai.get("items", [])) < MAX_ITEM_BENCH:
                     iid = random.choice(ITEM_IDS)
@@ -6235,7 +7589,8 @@ def draw_unit_cell(surface, r, unit, font_sm, font_md, is_drag_src=False):
         if is_drag_src:
             return
         name_col = COST_COLORS.get(cost, TEXT_WHITE)
-        draw_text(surface, champ_cn(unit.get("name", "?"))[:4],
+        _n = champ_cn(unit.get("name", "?"))
+        draw_text(surface, _n[:3] if len(_n) > 3 else _n,
                   r.centerx, r.centery - 4, font_sm, name_col, align_center=True)
         draw_text(surface, f"{'★' * star}", r.centerx, r.centery + 9,
                   font_sm, border, align_center=True)
@@ -6329,7 +7684,8 @@ def draw_battle_unit(screen, unit, font_sm, is_ally):
     if unit.mana_regen > 0:
         draw_text(screen, "法", cx + size // 2 - 8, cy - size // 2 + 4,
                   font_sm, (100, 220, 255), align_center=True)
-    draw_text(screen, champ_cn(unit.base["name"])[:4],
+    _n = champ_cn(unit.base["name"])
+    draw_text(screen, _n[:3] if len(_n) > 3 else _n,
               cx, cy - size // 2 - 10, font_sm, TEXT_WHITE, align_center=True)
     draw_text(screen, f"{star}星", cx, cy, font_sm, border_col, align_center=True)
     hp_ratio = max(0, unit.current_hp) / max(1, unit.base["hp"])
@@ -6457,8 +7813,10 @@ def draw_damage_report(screen, gs, font_lg, font_md, font_sm, W, H):
         title = f"{gs.player_label(battle.attacker)} 对 {gs.player_label(battle.defender)}"
         title_col = TEXT_WHITE
     draw_text(screen, "战斗结算", W // 2, py + 22, font_lg, TEXT_WHITE, True)
-    draw_text(screen, title, W // 2, py + 48, font_md, title_col, True)
+    _title_y = py + 22 + font_lg.get_height() // 2 + font_md.get_height() // 2 + 8
+    draw_text(screen, title, W // 2, _title_y, font_md, title_col, True)
     pad = 14
+    _team_label_y = _title_y + font_md.get_height() // 2 + 12
     col_w = (panel_w - pad * 3) / 2
     left_x = px + pad
     right_x = px + pad + col_w + pad
@@ -6469,13 +7827,13 @@ def draw_damage_report(screen, gs, font_lg, font_md, font_sm, W, H):
         d_label = "敌方"
     else:
         d_label = gs.player_label(battle.defender)
-    draw_panel(screen, pygame.Rect(left_x, py + 72, col_w, 24),
+    draw_panel(screen, pygame.Rect(left_x, _team_label_y, col_w, 24),
                (30, 60, 110), (60, 120, 180), 5, 1)
-    draw_text(screen, a_label, left_x + col_w // 2, py + 84, font_md, BLUE_MANA, True)
-    draw_panel(screen, pygame.Rect(right_x, py + 72, col_w, 24),
+    draw_text(screen, a_label, left_x + col_w // 2, _team_label_y + 12, font_md, BLUE_MANA, True)
+    draw_panel(screen, pygame.Rect(right_x, _team_label_y, col_w, 24),
                (110, 40, 40), (180, 60, 60), 5, 1)
-    draw_text(screen, d_label, right_x + col_w // 2, py + 84, font_md, RED, True)
-    header_y = py + 104
+    draw_text(screen, d_label, right_x + col_w // 2, _team_label_y + 12, font_md, RED, True)
+    header_y = _team_label_y + 24 + font_sm.get_height() // 2 + 4
     icon_size = 6
     for base_x in (left_x, right_x):
         draw_text(screen, "英雄", base_x + 6, header_y, font_sm, TEXT_DIM)
@@ -6904,36 +8262,65 @@ def draw_side_traits(screen, view_p, x, y, panel_w, panel_h, font_sm, font_md):
         draw_text(screen, "羁绊", x + 8, y + 4, font_sm, GOLD_COLOR)
         draw_text(screen, "(无)", x + 8, y + 24, font_sm, TEXT_DIM)
         return
+    # 收集所有羁绊，附上档位信息
     active_traits = []
     for trait, count in tc.items():
         thresholds = TRAIT_DATA.get(trait, [])
         tier = sum(1 for t in thresholds if count >= t)
-        active_traits.append((trait, count, tier))
-    priority = {"BearRidge": 0, "RuneLand": 1, "Treasure": 2}
-    active_traits.sort(key=lambda t: (priority.get(t[0], 9), -t[2], -t[1]))
+        active_traits.append((trait, count, tier, thresholds))
+    # 排序：已激活的排最上面 → 档位降序 → 数量降序 → 未激活的按数量降序
+    active_traits.sort(key=lambda t: (
+        0 if t[2] > 0 else 1, -t[2], -t[1]))
     draw_panel(screen, pygame.Rect(x, y, panel_w, panel_h),
                (20, 22, 30), (65, 72, 88), 8, 1)
     draw_text(screen, "羁绊", x + 8, y + 4, font_sm, GOLD_COLOR)
     ly = y + 24
-    for trait, count, tier in active_traits[:8]:
+    prismatic_col = RARITY_COLOR["prismatic"]  # (220,130,255) 棱彩紫
+    for trait, count, tier, thresholds in active_traits[:10]:
         short = trait_short_cn(trait)
-        thresholds = TRAIT_DATA.get(trait, [])
+        max_tier = len(thresholds)
+        is_max = (tier >= max_tier) and tier > 0  # 已激活到最高档
         next_thresh = None
         for t in thresholds:
             if count < t:
                 next_thresh = t
                 break
         prog = f"{count}/{next_thresh}" if next_thresh else f"{count}"
-        if trait in TRAIT_COLOR:
-            col = TRAIT_COLOR[trait] if tier > 0 else TEXT_DIM
+        # === 颜色分级 ===
+        if tier <= 0:
+            col = TEXT_DIM                    # 未激活：灰
+        elif is_max:
+            col = prismatic_col               # 最高档：棱彩紫
+        elif trait in TRAIT_COLOR:
+            col = TRAIT_COLOR[trait]          # 专属色（狗熊/符文/财宝）
         else:
-            col = GREEN_HP if tier > 0 else TEXT_DIM
-        is_big = trait in ("BearRidge", "RuneLand", "Treasure")
-        if is_big:
-            draw_text(screen, f"{short} {prog}", x + 8, ly, font_md, col)
+            col = GREEN_HP                    # 普通已激活：绿
+        # === 字体分级 ===
+        if is_max:
+            use_font = font_md                # 最高档最大
+        elif tier >= 2:
+            use_font = get_font(24)           # 中档稍大
         else:
-            draw_text(screen, f"{short} {prog}", x + 8, ly, font_sm, col)
-        ly += 22
+            use_font = font_sm                # 未激活 / 1档保持原样
+        # === 左侧等级竖条 ===
+        if tier > 0:
+            bar_h = use_font.get_height() - 2
+            bar_w = min(6, 2 + tier)
+            if is_max:
+                bar_col = prismatic_col
+            elif tier >= 3:
+                bar_col = GOLD_COLOR
+            else:
+                bar_col = GREEN_HP
+            pygame.draw.rect(screen, bar_col,
+                             (x + 3, ly + 1, bar_w, bar_h),
+                             border_radius=2)
+        # === 文字 ===
+        text_x = x + 8 + (8 if tier > 0 else 0)
+        draw_text(screen, f"{short} {prog}", text_x, ly, use_font, col)
+        ly += use_font.get_height() + 4
+        if ly > y + panel_h - 16:
+            break
 
 
 def draw_bounty_popup(screen, gs, font_lg, font_md, font_sm, W, H, mouse_pos):
@@ -7485,7 +8872,7 @@ def draw_bottom_info_panel(screen, gs, view_p, font_lg, font_md, font_sm,
                      (mid_x, y + h - 8), 1)
 
     draw_text(screen, "战斗记录", x + 12, y + 8, font_md, GOLD_COLOR)
-    line_h = 18
+    line_h = font_sm.get_height() + 4
     log_w = max(40, mid_x - x - 24)
     max_lines = max(1, int((h - 44) // line_h))
     avg_char_w = max(1, font_sm.size("M")[0])
@@ -7504,7 +8891,9 @@ def draw_bottom_info_panel(screen, gs, view_p, font_lg, font_md, font_sm,
             ly += line_h
 
     draw_text(screen, "当前状态", mid_x + 12, y + 8, font_md, GOLD_COLOR)
-    ry = y + 34
+
+    # 组装状态行
+    status_items = []
     gold = view_p["gold"]
     level = view_p["level"]
     interest = min(5, gold // 10)
@@ -7514,12 +8903,8 @@ def draw_bottom_info_panel(screen, gs, view_p, font_lg, font_md, font_sm,
     hex_income = get_hex_bonuses(view_p)["income"]
     treasure_income = get_treasure_gold(view_p)
     next_income = base + interest + streak_bonus + hex_income + treasure_income
-    draw_text(screen, f"下回合收入: +{next_income} 金",
-              mid_x + 12, ry, font_sm, GOLD_COLOR)
-    ry += 20
-    draw_text(screen, f"等级 {level} · 上场 {count_board_units(view_p)}/{get_population_cap(view_p)}",
-              mid_x + 12, ry, font_sm, TEXT_WHITE)
-    ry += 20
+    status_items.append((f"下回合收入: +{next_income} 金", GOLD_COLOR))
+    status_items.append((f"等级 {level} · 上场 {count_board_units(view_p)}/{get_population_cap(view_p)}", TEXT_WHITE))
     tc = count_traits(view_p)
     if tc:
         active_cnt = 0
@@ -7527,24 +8912,42 @@ def draw_bottom_info_panel(screen, gs, view_p, font_lg, font_md, font_sm,
             thresholds = TRAIT_DATA.get(trait, [])
             if sum(1 for t in thresholds if count >= t) > 0:
                 active_cnt += 1
-        draw_text(screen, f"激活羁绊: {active_cnt} / {len(tc)}",
-                  mid_x + 12, ry, font_sm, GREEN_HP)
-    # 财宝猎人：显示当前收菜层数与藏宝碎片进度
+        status_items.append((f"激活羁绊: {active_cnt} / {len(tc)}", GREEN_HP))
     _tr_thr = TRAIT_DATA.get("Treasure", [])
     if _tr_thr and tc.get("Treasure", 0) >= _tr_thr[0]:
-        ry += 20
-        draw_text(screen,
-                  f"寻宝: 第{getattr(gs, 'bounty_layer_current', 1)}层 · 藏宝碎片{getattr(gs, 'bounty_shards', 0)}/10",
-                  mid_x + 12, ry, font_sm, (255, 210, 90))
+        status_items.append((f"寻宝: 第{getattr(gs, 'bounty_layer_current', 1)}层 · 藏宝碎片{getattr(gs, 'bounty_shards', 0)}/10", (255, 210, 90)))
     ws = view_p.get("win_streak", 0)
     ls = view_p.get("lose_streak", 0)
     if ws >= 2 or ls >= 2:
-        ry += 20
         tag = "连胜" if ws >= 2 else "连败"
         n = ws if ws >= 2 else ls
         bonus = 3 if n >= 5 else (2 if n >= 3 else 1)
-        draw_text(screen, f"{tag} x{n} · +{bonus} 金",
-                  mid_x + 12, ry, font_sm, (255, 180, 60))
+        status_items.append((f"{tag} x{n} · +{bonus} 金", (255, 180, 60)))
+
+    # 滚动 + 裁剪绘制
+    line_h_st = font_sm.get_height() + 6
+    total_h = len(status_items) * line_h_st
+    view_h = h - 44
+    max_scroll = max(0, total_h - view_h)
+    gs._info_scroll_y = max(0, min(getattr(gs, "_info_scroll_y", 0), max_scroll))
+    clip_rect = pygame.Rect(mid_x + 12, y + 34, w // 2 - 24, view_h)
+    old_clip = screen.get_clip()
+    screen.set_clip(clip_rect)
+    start_y = y + 34 - gs._info_scroll_y
+    for i, (text, col) in enumerate(status_items):
+        item_y = start_y + i * line_h_st
+        if item_y + line_h_st > y + 34 and item_y < y + 34 + view_h:
+            draw_text(screen, text, mid_x + 12, item_y, font_sm, col)
+    screen.set_clip(old_clip)
+
+    # 滚动条
+    if max_scroll > 0:
+        sb_x = x + w - 8
+        pygame.draw.rect(screen, (50, 50, 60), (sb_x, y + 34, 4, view_h), border_radius=2)
+        sb_h = max(10, int(view_h * view_h / total_h))
+        sb_y = y + 34 + int((view_h - sb_h) * gs._info_scroll_y / max_scroll)
+        pygame.draw.rect(screen, (150, 150, 170), (sb_x, sb_y, 4, sb_h), border_radius=2)
+
     if count_board_units(view_p) > get_population_cap(view_p):
         draw_text(screen, "⚠ 人口已超限，请出售单位或升人口",
                   x + 12, y + h - 36, font_sm, (255, 90, 90))
@@ -8224,6 +9627,10 @@ def draw_game(screen, gs, font_lg, font_md, font_sm, font_dmg, W, H, mouse_pos):
     draw_text(screen, f"{used}/{MAX_ITEM_BENCH}",
               item_bg.right + 8, item_y + item_slot // 2, font_sm, TEXT_DIM)
 
+    # 显示当前等级的商店刷新概率
+    odds = SHOP_ODDS.get(gs.me["level"], SHOP_ODDS[MAX_LEVEL])
+    odds_str = "  ".join([f"{i+1}费:{odds[i]}%" for i in range(5)])
+    draw_text(screen, odds_str, 10, item_y + item_slot + 4, font_sm, (180, 180, 200))
     shop_y = item_y + item_slot + 20
     lock_w = 76
     shop_area_w = W - 20 - lock_w - 4 * 6
@@ -8390,6 +9797,7 @@ def draw_game(screen, gs, font_lg, font_md, font_sm, font_dmg, W, H, mouse_pos):
         tw = min(tw, 680)
         th = min(th, 780)
         tx, ty = W // 2 - tw // 2, H // 2 - th // 2
+        gs._trait_popup_rect = pygame.Rect(tx, ty, tw, th)
         draw_panel(screen, pygame.Rect(tx, ty, tw, th),
                    (28, 32, 42), (100, 70, 140), 14, 2)
         header_h = 46
@@ -8410,9 +9818,14 @@ def draw_game(screen, gs, font_lg, font_md, font_sm, font_dmg, W, H, mouse_pos):
         sorted_traits = sorted(trait_count.items(), key=lambda x: -x[1])
         # 预构建内容行：(y偏移, 行高, 绘制函数)
         pad_x = tx + 16
-        col_gap = 18
         content_rows = []
         cur_y = 8
+        # 动态行高：字体调大后必须按字体实际高度算，否则文字会叠在一起
+        _row_h_sm = font_sm.get_height() + 10
+        _row_h_eff = font_sm.get_height() + 8
+        _row_h_champ = font_sm.get_height() + 8
+        _row_h_buff = font_md.get_height() + 10
+        _gap_section = 12
         _role_class = {"ClassTank": "tank", "ClassArcher": "archer",
                        "ClassMage": "mage", "ClassWarrior": "warrior"}
         for trait_name, cnt in sorted_traits:
@@ -8425,9 +9838,9 @@ def draw_game(screen, gs, font_lg, font_md, font_sm, font_dmg, W, H, mouse_pos):
             else:
                 col = GOLD_COLOR if tier > 0 else TEXT_WHITE
             content_rows.append(
-                (cur_y, 20, lambda yy, s=title, c=col:
+                (cur_y, _row_h_sm, lambda yy, s=title, c=col:
                  draw_text(screen, s, pad_x, ty + header_h + yy, font_sm, c)))
-            cur_y += 20
+            cur_y += _row_h_sm
             if trait_name in TRAIT_DESC:
                 effect_name, effects = TRAIT_DESC[trait_name]
                 for i, eff_txt in enumerate(effects):
@@ -8436,10 +9849,10 @@ def draw_game(screen, gs, font_lg, font_md, font_sm, font_dmg, W, H, mouse_pos):
                     col2 = GREEN_HP if is_active else (140, 140, 140)
                     line = f"  {mark} ({thresholds[i]}) {effect_name} {eff_txt}"
                     content_rows.append(
-                        (cur_y, 18, lambda yy, l=line, c=col2:
+                        (cur_y, _row_h_eff, lambda yy, l=line, c=col2:
                          draw_text(screen, l, pad_x, ty + header_h + yy,
                                    font_sm, c)))
-                    cur_y += 18
+                    cur_y += _row_h_eff
             if trait_name in _role_class:
                 _tr = _role_class[trait_name]
                 trait_champs = [c for c in CHAMPION_LIST
@@ -8453,67 +9866,71 @@ def draw_game(screen, gs, font_lg, font_md, font_sm, font_dmg, W, H, mouse_pos):
                 trait_champs = []
             if trait_champs:
                 trait_champs = sorted(trait_champs, key=lambda c: c["cost"])
-                label_y = cur_y
                 content_rows.append(
-                    (label_y, 18, lambda yy:
-                     draw_text(screen, "  棋子:", pad_x, ty + header_h + yy,
-                               font_sm, (170, 200, 255))))
-                cur_y += 18
+                    (cur_y, _row_h_champ, lambda yy:
+                     draw_text(screen, "  棋子:", pad_x,
+                               ty + header_h + yy, font_sm,
+                               (170, 200, 255))))
+                cur_y += _row_h_champ
                 # 两栏分栏渲染
                 mid_x = pad_x + (tw - 40) // 2
                 for k in range(0, len(trait_champs), 2):
                     pair = trait_champs[k:k + 2]
+
                     def _draw_pair(yy, pair=pair):
                         for j, c in enumerate(pair):
                             on_board = c["name"] in board_names
                             nm_col = GREEN_HP if on_board else (170, 200, 255)
                             nm = f"{champ_cn(c['name'])}{c['cost']}费"
-                            draw_text(screen, nm, pad_x + j * (mid_x - pad_x),
+                            draw_text(screen, nm,
+                                      pad_x + j * (mid_x - pad_x),
                                       ty + header_h + yy, font_sm, nm_col)
-                    content_rows.append((cur_y, 18, _draw_pair))
-                    cur_y += 18
-                cur_y += 4
-            cur_y += 6
+                    content_rows.append((cur_y, _row_h_champ, _draw_pair))
+                    cur_y += _row_h_champ
+                cur_y += 6
+            cur_y += _gap_section
         buffs = apply_trait_buffs(view_p)
         merge_hex_into_buffs(buffs, view_p)
-        cur_y += 6
+        cur_y += _gap_section
         content_rows.append(
-            (cur_y, 22, lambda yy:
-             draw_text(screen, "总加成:", pad_x, ty + header_h + yy,
-                       font_sm, GOLD_COLOR)))
-        cur_y += 22
+            (cur_y, _row_h_buff, lambda yy:
+             draw_text(screen, "总加成:", pad_x,
+                       ty + header_h + yy, font_sm, GOLD_COLOR)))
+        cur_y += _row_h_buff
         content_rows.append(
-            (cur_y, 20, lambda yy:
+            (cur_y, _row_h_buff, lambda yy:
              draw_text(screen,
                        f"攻击 x{buffs['atk_mult']:.2f}  法强 x{buffs['sp_mult']:.2f}",
                        pad_x, ty + header_h + yy, font_sm, TEXT_WHITE)))
-        cur_y += 20
+        cur_y += _row_h_buff
         content_rows.append(
-            (cur_y, 20, lambda yy:
+            (cur_y, _row_h_buff, lambda yy:
              draw_text(screen,
                        f"生命 x{buffs['hp_mult']:.2f}  暴击 {int(buffs['crit'] * 100)}%",
                        pad_x, ty + header_h + yy, font_sm, TEXT_WHITE)))
-        cur_y += 20
+        cur_y += _row_h_buff
         content_rows.append(
-            (cur_y, 20, lambda yy:
+            (cur_y, _row_h_buff, lambda yy:
              draw_text(screen,
                        f"攻速 x{buffs['atk_speed_mult']:.2f}  额外回蓝 {buffs['extra_mana_per_attack']}",
                        pad_x, ty + header_h + yy, font_sm, TEXT_WHITE)))
-        cur_y += 20
+        cur_y += _row_h_buff
         sum_star = get_bear_ridge_summon_star(view_p)
         if sum_star > 0:
             content_rows.append(
-                (cur_y, 20, lambda yy:
-                 draw_text(screen, f"狗熊岭召唤: {sum_star}星团子",
-                           pad_x, ty + header_h + yy, font_sm, (180, 230, 255))))
-            cur_y += 20
+                (cur_y, _row_h_buff, lambda yy:
+                 draw_text(screen, f"狗熊岭召唤: 团子 {sum_star}星",
+                           pad_x, ty + header_h + yy,
+                           font_sm, BEAR_COLOR)))
+            cur_y += _row_h_buff
         t_gold = get_treasure_gold(view_p)
         if t_gold > 0:
             content_rows.append(
-                (cur_y, 20, lambda yy:
+                (cur_y, _row_h_buff, lambda yy:
                  draw_text(screen, f"财宝猎人: 每回合 +{t_gold} 金",
-                           pad_x, ty + header_h + yy, font_sm, TREASURE_COLOR)))
-            cur_y += 20
+                           pad_x, ty + header_h + yy,
+                           font_sm, TREASURE_COLOR)))
+            cur_y += _row_h_buff
         content_h = cur_y
         view_h = th - header_h - 8
         max_scroll = max(0, content_h - view_h)
@@ -8651,48 +10068,178 @@ def draw_main_menu(screen, font_title, font_lg, font_md, font_sm,
     draw_text(screen, "Leopard Potion AutoBattle Chess", W // 2, title_y + 40,
               font_sm, TEXT_DIM, True)
     d_col = DIFFICULTY_COLOR.get(difficulty, TEXT_DIM)
-    draw_text(screen, f"当前AI难度: {DIFFICULTY_NAME.get(difficulty, '?')}",
+    draw_text(screen,
+              f"当前AI难度: {DIFFICULTY_NAME.get(difficulty, '?')}  |  "
+              f"排位: {RANK_STATE.get('rank', '青铜')} "
+              f"{RANK_STATE.get('score', 0)}分"
+              f"({RANK_STATE.get('wins', 0)}胜{RANK_STATE.get('losses', 0)}负)",
               W // 2, title_y + 70, font_md, d_col, True)
     draw_menu_decoration(screen, font_sm, W, H)
     btn_w = W * 0.50
-    btn_h = 56
-    gap = 12
+    btn_h = 44
+    gap = 6
     btn_x = W // 2 - btn_w // 2
-    start_y = H * 0.53
+    if has_save():
+        group_h = 9 * btn_h + 8 * gap
+    else:
+        group_h = 8 * btn_h + 7 * gap
+    top = max(150, int(H * 0.5 - group_h / 2))
     continue_btn = None
     if has_save():
-        continue_btn = pygame.Rect(btn_x, start_y - btn_h - gap, btn_w, btn_h)
-    start_btn = pygame.Rect(btn_x, start_y, btn_w, btn_h)
-    multi_btn = pygame.Rect(btn_x, start_y + btn_h + gap, btn_w, btn_h)
-    update_btn = pygame.Rect(btn_x, start_y + 2 * (btn_h + gap), btn_w, btn_h)
-    settings_btn = pygame.Rect(btn_x, start_y + 3 * (btn_h + gap), btn_w, btn_h)
-    quit_btn = pygame.Rect(btn_x, start_y + 4 * (btn_h + gap), btn_w, btn_h)
+        continue_btn = pygame.Rect(btn_x, top, btn_w, btn_h)
+        top += btn_h + gap
+    start_btn = pygame.Rect(btn_x, top, btn_w, btn_h)
+    top += btn_h + gap
+    multi_btn = pygame.Rect(btn_x, top, btn_w, btn_h)
+    top += btn_h + gap
+    rank_btn = pygame.Rect(btn_x, top, btn_w, btn_h)
+    top += btn_h + gap
+    challenge_btn = pygame.Rect(btn_x, top, btn_w, btn_h)
+    top += btn_h + gap
+    update_btn = pygame.Rect(btn_x, top, btn_w, btn_h)
+    top += btn_h + gap
+    train_btn = pygame.Rect(btn_x, top, btn_w, btn_h)
+    top += btn_h + gap
+    settings_btn = pygame.Rect(btn_x, top, btn_w, btn_h)
+    top += btn_h + gap
+    quit_btn = pygame.Rect(btn_x, top, btn_w, btn_h)
     btn_list = []
     if continue_btn is not None:
         btn_list.append((continue_btn, "继续游戏", (30, 60, 40), (45, 90, 60), GREEN_HP))
     btn_list += [
         (start_btn, "开始游戏", (55, 45, 15), (95, 78, 25), GOLD_COLOR),
         (multi_btn, "联机对战", (30, 55, 45), (45, 80, 65), GREEN_HP),
+        (rank_btn, "排位赛", (70, 45, 15), (120, 80, 25), GOLD_COLOR),
+        (challenge_btn, "挑战最强AI", (60, 30, 60), (95, 50, 100), (200, 60, 230)),
         (update_btn, "检测更新", (35, 45, 70), (50, 65, 100), RUNE_COLOR),
+        (train_btn, "训练极限AI", (50, 40, 70), (75, 55, 110), PURPLE),
         (settings_btn, "设置", (30, 40, 60), (45, 60, 90), BLUE),
         (quit_btn, "退出", (50, 25, 25), (75, 40, 40), RED),
     ]
     for btn, label, base_col, hover_col, border in btn_list:
         hovered = btn.collidepoint(mouse_pos)
         draw_button(screen, btn, hover_col if hovered else base_col, border, 12)
-        if label == "开始游戏":
+        if label in ("开始游戏", "排位赛"):
             label_col = GOLD_COLOR
         elif label in ("联机对战", "继续游戏"):
             label_col = GREEN_HP
+        elif label == "挑战最强AI":
+            label_col = (200, 60, 230)
         else:
             label_col = TEXT_WHITE
         draw_text(screen, label, btn.centerx, btn.centery,
                   get_font(28), label_col, True)
-    draw_text(screen, "v1.3.0  ·  Built with Pygame  ·  支持联机对战",
+    draw_text(screen, "v1.3.3  ·  Built with Pygame  ·  支持联机对战",
               W // 2, H - 22, font_sm, (100, 105, 115), True)
     draw_text(screen, f"调试: {DBG_LAST}", W // 2, H - 8, font_sm,
               (200, 60, 60), align_center=True)
-    return continue_btn, start_btn, multi_btn, update_btn, settings_btn, quit_btn
+    return (continue_btn, start_btn, multi_btn, rank_btn, challenge_btn,
+            update_btn, train_btn, settings_btn, quit_btn)
+
+
+def draw_rank_page(screen, font_title, font_lg, font_md, font_sm,
+                   W, H, mouse_pos):
+    """排位赛专属页面：当前段位/战绩 + 段位进度 + 段位表 + 加分机制说明，
+    点击『开始对战』才进入排位对局。"""
+    screen.fill((8, 10, 16))
+    try:
+        for i in range(60):
+            sx = (i * 7919) % W
+            sy = (i * 6133) % H
+            rr = 1 + (i % 3)
+            alpha = 80 + (i * 13) % 120
+            s = pygame.Surface((rr * 2, rr * 2), pygame.SRCALPHA)
+            s.fill((255, 255, 255, alpha))
+            screen.blit(s, (sx, sy))
+    except Exception:
+        pass
+    try:
+        glow = pygame.Surface((W, 300), pygame.SRCALPHA)
+        for i in range(100, 0, -10):
+            a = int(15 * (100 - i) / 100)
+            pygame.draw.ellipse(glow, (*GOLD_DEEP, a),
+                                (W // 2 - i * 4, 130 - i, i * 8, i * 3))
+        screen.blit(glow, (0, 0))
+    except Exception:
+        pass
+
+    draw_text(screen, "排 位 赛", W // 2, H * 0.09, font_title, GOLD_COLOR, True)
+    draw_text(screen, "Ranked Ladder", W // 2, H * 0.09 + 34, font_sm, TEXT_DIM, True)
+
+    rank = RANK_STATE.get("rank", "青铜")
+    score = RANK_STATE.get("score", 0)
+    wins = RANK_STATE.get("wins", 0)
+    losses = RANK_STATE.get("losses", 0)
+
+    # 当前段位 + 战绩
+    draw_text(screen, rank, W // 2, H * 0.20, font_lg, GOLD_COLOR, True)
+    draw_text(screen, f"当前分数 {score}  ·  {wins}胜 {losses}负",
+              W // 2, H * 0.20 + 34, font_md, TEXT_WHITE, True)
+
+    # 段位进度条
+    _cur_need, _cur_rank, nxt_rank, nxt_need, prog = _rank_progress(score)
+    bar_x, bar_y = int(W * 0.15), int(H * 0.30)
+    bar_w, bar_h = int(W * 0.70), 16
+    pygame.draw.rect(screen, (40, 42, 54), (bar_x, bar_y, bar_w, bar_h),
+                     border_radius=8)
+    if bar_w > 0:
+        fill_w = max(6, int(bar_w * prog))
+        pygame.draw.rect(screen, GOLD_COLOR,
+                         (bar_x, bar_y, fill_w, bar_h), border_radius=8)
+    if nxt_rank is not None:
+        draw_text(screen, f"距离 {nxt_rank} 还需 {max(0, nxt_need - score)} 分",
+                  W // 2, bar_y + bar_h + 16, font_sm, TEXT_DIM, True)
+    else:
+        draw_text(screen, "已登顶王者，继续冲分创造纪录！",
+                  W // 2, bar_y + bar_h + 16, font_sm, TEXT_DIM, True)
+
+    # 段位一览（两列四行）
+    table_y = int(H * 0.42)
+    draw_text(screen, "段位一览", W // 2, table_y, font_md, GOLD_COLOR, True)
+    col_x1, col_x2 = int(W * 0.22), int(W * 0.62)
+    row_h = int(H * 0.035)
+    for i, (need, r) in enumerate(RANK_TABLE):
+        x = col_x1 if i % 2 == 0 else col_x2
+        y = table_y + 30 + (i // 2) * row_h
+        col = GOLD_COLOR if r == rank else TEXT_WHITE
+        draw_text(screen, f"{r}  {need}分", x, y, font_sm, col, True)
+
+    # 加分机制说明
+    rules_y = int(H * 0.60)
+    draw_text(screen, "加分机制", W // 2, rules_y, font_md, GOLD_COLOR, True)
+    rules = [
+        "胜利 +20分  ·  失败 -10分（按对手真实段位缩放）",
+        "对手段位低于你（虚高保护）：赢少加、输多扣",
+        "对手段位高于你：赢多加、输少扣，鼓励越级挑战",
+        "青铜 0 分保底：失败不会扣成负数",
+        "分数达标自动升段：青铜0 / 白银100 / 黄金250 / 铂金450",
+        "钻石700 / 大师1000 / 宗师1400 / 王者1900",
+        "内置青铜→王者全套段位AI：下载即用，无需训练",
+        "本地离线训练出的AI会自动覆盖对应段位",
+    ]
+    for i, line in enumerate(rules):
+        draw_text(screen, line, W // 2, rules_y + 28 + i * 24,
+                  font_sm, TEXT_WHITE, True)
+
+    # 操作按钮：开始对战 / 返回主菜单
+    btn_w = W * 0.50
+    btn_h = 46
+    btn_x = W // 2 - btn_w // 2
+    start_btn = pygame.Rect(btn_x, int(H * 0.88) - btn_h - 10, btn_w, btn_h)
+    back_btn = pygame.Rect(btn_x, int(H * 0.88) + 4, btn_w, btn_h)
+    hover_s = start_btn.collidepoint(mouse_pos)
+    hover_b = back_btn.collidepoint(mouse_pos)
+    draw_button(screen, start_btn,
+                (120, 80, 25) if hover_s else (95, 78, 25), GOLD_COLOR, 12)
+    draw_text(screen, "开始对战", start_btn.centerx, start_btn.centery,
+              get_font(28), GOLD_COLOR, True)
+    draw_button(screen, back_btn,
+                (60, 62, 74) if hover_b else (45, 47, 58), TEXT_DIM, 12)
+    draw_text(screen, "返回主菜单", back_btn.centerx, back_btn.centery,
+              get_font(26), TEXT_WHITE, True)
+    draw_text(screen, "v1.3.3  ·  排位赛·内置段位池", W // 2, H - 16, font_sm,
+              (100, 105, 115), True)
+    return start_btn, back_btn
 
 
 def draw_settings_menu(screen, font_title, font_lg, font_md, font_sm,
@@ -8712,6 +10259,7 @@ def draw_settings_menu(screen, font_title, font_lg, font_md, font_sm,
         "normal": "AI 决策正常 · 收入标准 · 偶尔摸鱼",
         "hard": "AI 决策到位 · 收入 +25% · 升级更快",
         "extreme": "AI 决策到位 · 收入 +60% · 极限运营",
+        "nightmare": "7名对手全部为当前最强AI · 收入 +75% · 顶级运营",
     }
     for i, d in enumerate(DIFFICULTY_ORDER):
         r = pygame.Rect(btn_x, start_y + i * (btn_h + gap), btn_w, btn_h)
@@ -8754,6 +10302,73 @@ def draw_settings_menu(screen, font_title, font_lg, font_md, font_sm,
     draw_text(screen, "返回主菜单", back_btn.centerx, back_btn.centery,
               font_lg, TEXT_WHITE, True)
     return diff_rects, back_btn, changelog_btn
+
+
+def draw_challenge_page(screen, font_title, font_lg, font_md, font_sm,
+                        W, H, mouse_pos):
+    """挑战最强AI专属页面：7名对手全部为当前最强AI，击败它们证明实力。
+    点击『开始挑战』以噩梦模式进入对局；对局结算会记录玩家信息供AI自我升级。"""
+    screen.fill((8, 10, 16))
+    try:
+        for i in range(60):
+            sx = (i * 7919) % W
+            sy = (i * 6133) % H
+            rr = 1 + (i % 3)
+            alpha = 80 + (i * 13) % 120
+            s = pygame.Surface((rr * 2, rr * 2), pygame.SRCALPHA)
+            s.fill((255, 255, 255, alpha))
+            screen.blit(s, (sx, sy))
+    except Exception:
+        pass
+    try:
+        glow = pygame.Surface((W, 300), pygame.SRCALPHA)
+        for i in range(100, 0, -10):
+            a = int(15 * (100 - i) / 100)
+            pygame.draw.ellipse(glow, (*GOLD_DEEP, a),
+                                (W // 2 - i * 4, 130 - i, i * 8, i * 3))
+        screen.blit(glow, (0, 0))
+    except Exception:
+        pass
+
+    draw_text(screen, "挑战最强AI", W // 2, H * 0.09, font_title,
+              (200, 60, 230), True)
+    draw_text(screen, "Nightmare Challenge", W // 2, H * 0.09 + 34,
+              font_sm, TEXT_DIM, True)
+
+    # 当前最强AI信息
+    best_score = _TRAINING_STATE.get("best_score", 0.0)
+    best_rank = _ai_rank_from_score(best_score)
+    if best_score > 0:
+        ai_line = f"当前最强AI: {best_rank}AI · 综合分 {best_score:.1f}"
+    else:
+        ai_line = "当前最强AI: 出厂极限AI（尚未训练，建议先训练极限AI）"
+    draw_text(screen, ai_line, W // 2, H * 0.20, font_md, GOLD_COLOR, True)
+    draw_text(screen, "7名对手全部为当前最强AI", W // 2, H * 0.28,
+              font_lg, TEXT_WHITE, True)
+    draw_text(screen, "击败它们，证明你才是豹药宇宙的最强玩家",
+              W // 2, H * 0.28 + 34, font_md, TEXT_DIM, True)
+    draw_text(screen, "· 对手收入 +75% · 顶级运营 · 全程针对你的阵容",
+              W // 2, H * 0.40, font_sm, TEXT_WHITE, True)
+    draw_text(screen, "· 你的每一局都会被记录，AI 用你的打法自我升级",
+              W // 2, H * 0.40 + 24, font_sm, TEXT_WHITE, True)
+    draw_text(screen, "· 建议先到「训练极限AI」把 AI 练到白银以上再挑战",
+              W // 2, H * 0.40 + 48, font_sm, (255, 170, 60), True)
+
+    start_btn = pygame.Rect(W // 2 - W * 0.28, H * 0.62, W * 0.56, 68)
+    hovered_st = start_btn.collidepoint(mouse_pos)
+    draw_button(screen, start_btn,
+                (120, 40, 130) if hovered_st else (70, 22, 80),
+                (200, 60, 230), 12)
+    draw_text(screen, "开始挑战", start_btn.centerx, start_btn.centery,
+              font_lg, (230, 190, 255), True)
+    back_btn = pygame.Rect(W // 2 - W * 0.22, H * 0.82, W * 0.44, 60)
+    hovered_back = back_btn.collidepoint(mouse_pos)
+    draw_button(screen, back_btn,
+                (45, 60, 90) if hovered_back else (30, 40, 60),
+                BLUE, 10)
+    draw_text(screen, "返回主菜单", back_btn.centerx, back_btn.centery,
+              font_lg, TEXT_WHITE, True)
+    return start_btn, back_btn
 
 def draw_changelog_popup(screen, font_lg, font_md, font_sm, W, H, mouse_pos):
     try:
@@ -8868,6 +10483,97 @@ def draw_update_popup(screen, font_lg, font_md, font_sm, W, H, mouse_pos,
     draw_text(screen, "稍后再说", close_btn.centerx, close_btn.centery,
               font_md, TEXT_WHITE, True)
     return close_btn, update_btn
+
+
+def draw_training_popup(screen, font_lg, font_md, font_sm, W, H, mouse_pos, st):
+    """极限 AI 离线训练进度弹窗。返回 (开始/停止按钮, 关闭按钮)。"""
+    try:
+        ov = pygame.Surface((W, H), pygame.SRCALPHA)
+        ov.fill((0, 0, 0, 235))
+        screen.blit(ov, (0, 0))
+    except Exception:
+        pass
+    pw, ph = int(W * 0.88), int(H * 0.84)
+    px, py = W // 2 - pw // 2, H // 2 - ph // 2
+    draw_panel(screen, pygame.Rect(px, py, pw, ph),
+               (18, 22, 32), (130, 90, 190), 12, 2)
+    draw_text(screen, "极 限 AI 离 线 训 练", W // 2, py + 22,
+              get_font(30), PURPLE, True)
+
+    running = st.get("running", False)
+    status_col = GREEN_HP if running else TEXT_DIM
+    draw_text(screen, "● 训练中" if running else "○ 已停止",
+              px + 24, py + 60, font_md, status_col)
+
+    ly = py + 96
+    draw_text(screen, f"段位: {st.get('rank', '青铜')}",
+              px + 24, ly, font_md, GOLD_COLOR)
+    draw_text(screen, f"阶段: {st.get('phase_label', '普通')} "
+                      f"(phase {st.get('phase', 1)}/3)",
+              px + pw // 2, ly, font_md, RUNE_COLOR)
+    draw_text(screen, f"对手池: {st.get('pool_size', 2)}",
+              px + pw - 150, ly, font_md, TREASURE_COLOR)
+    ly += 30
+    draw_text(screen, f"代数: {st.get('generation', 0)}",
+              px + 24, ly, font_md, TEXT_WHITE)
+    draw_text(screen, f"候选: {st.get('current_variant', 0)}"
+                      f"/{st.get('current_population', 0)}",
+              px + pw // 2, ly, font_md, TEXT_WHITE)
+    draw_text(screen, f"玩家对局: {len(_load_player_history())}",
+              px + pw - 170, ly, font_md, TEXT_WHITE)
+    ly += 30
+    draw_text(screen, f"本代最优: {max(0.0, st.get('gen_best', 0.0)):.1f}",
+              px + 24, ly, font_md, ORANGE_TIMER)
+    _bs = st.get("best_score", 0)
+    draw_text(screen, f"历史最优: {_bs:.1f}({_ai_rank_from_score(_bs)}AI)",
+              px + pw // 2, ly, font_md, GOLD_COLOR)
+    _stall = st.get("no_breakthrough_gens", 0)
+    draw_text(screen, f"停滞: {_stall}",
+              px + pw - 90, ly, font_md, TEXT_DIM)
+    ly += 30
+    _mode_col = ORANGE_TIMER if _stall >= 15 else TEXT_DIM
+    draw_text(screen, "变异模式: " + ("增强(大变异探索)" if _stall >= 15 else "标准"),
+              px + 24, ly, font_md, _mode_col)
+    ly += 26
+    draw_text(screen, "日志:", px + 24, ly, font_md, TEXT_WHITE)
+    ly += 24
+    for line in st.get("log", [])[-14:]:
+        if ly > py + ph - 110:
+            break
+        if len(line) > 54:
+            line = line[:54] + "…"
+        draw_text(screen, line, px + 30, ly, font_sm, TEXT_DIM)
+        ly += 20
+
+    btn_y = py + ph - 66
+    if running:
+        stop_btn = pygame.Rect(W // 2 - 210, btn_y, 200, 46)
+        hide_btn = pygame.Rect(W // 2 + 10, btn_y, 200, 46)
+        h1 = stop_btn.collidepoint(mouse_pos)
+        h2 = hide_btn.collidepoint(mouse_pos)
+        draw_button(screen, stop_btn,
+                    (110, 45, 45) if h1 else (70, 30, 30), RED, 10)
+        draw_text(screen, "停止训练", stop_btn.centerx, stop_btn.centery,
+                  font_md, TEXT_WHITE, True)
+        draw_button(screen, hide_btn,
+                    (60, 70, 90) if h2 else (40, 50, 70), RUNE_COLOR, 10)
+        draw_text(screen, "隐藏窗口", hide_btn.centerx, hide_btn.centery,
+                  font_md, TEXT_WHITE, True)
+        return stop_btn, hide_btn
+    else:
+        start_btn = pygame.Rect(W // 2 - 210, btn_y, 200, 46)
+        close_btn = pygame.Rect(W // 2 + 10, btn_y, 200, 46)
+        h1 = start_btn.collidepoint(mouse_pos)
+        h2 = close_btn.collidepoint(mouse_pos)
+        draw_button(screen, start_btn,
+                    (55, 100, 60) if h1 else (35, 75, 40), GREEN_HP, 10)
+        draw_text(screen, "开始训练", start_btn.centerx, start_btn.centery,
+                  font_md, TEXT_WHITE, True)
+        draw_button(screen, close_btn,
+                    (80, 55, 30) if h2 else (60, 40, 22), ORANGE_TIMER, 10)
+        draw_text(screen, "关闭", close_btn.centerx, close_btn.centery,
+                  font_md, TEXT_WHITE, True)
+        return start_btn, close_btn
 
 
 def draw_lobby(screen, font_title, font_lg, font_md, font_sm,
@@ -8986,9 +10692,35 @@ def draw_lobby(screen, font_title, font_lg, font_md, font_sm,
         return None, None, back_btn, connect_btn
 
 
+def _apply_nightmare_ai(gs):
+    """噩梦模式：7名对手全部使用当前最强AI（离线训练出的全局最优）。
+    对局结算照常记录玩家信息（_record_player_game(gs, '噩梦')），供AI自我升级。"""
+    ai_params = dict(EXTREME_AI_PARAMS)
+    mult = DIFFICULTY_MULT.get("nightmare", 1.75)
+    for ai in gs.players:
+        ai["difficulty_mult"] = mult
+        ai["_override_params"] = dict(ai_params)
+    gs.battle_log = "噩梦模式 · 7名对手均为当前最强AI · 击败它们证明你的实力！"
+
+
 def run_game_session(screen, clock, difficulty, font_lg, font_md, font_sm,
-                     font_dmg, net=None, is_host=False, load_save=False):
+                     font_dmg, net=None, is_host=False, load_save=False,
+                     rank_mode=None):
     gs = GameState(difficulty=difficulty, net=net, is_host=is_host)
+    if difficulty == "nightmare":
+        # 噩梦模式：显式把7名对手全部切换为当前最强AI
+        _apply_nightmare_ai(gs)
+    if rank_mode:
+        # 排位对局：对手AI按玩家段位匹配——优先同段位训练存档AI，缺失用全局最强AI兜底
+        p_rank = rank_mode.get("rank", "青铜")
+        ai_params, rmult, src, opp_rank = _ranked_opponent_ai(p_rank)
+        for ai in gs.players:
+            ai["difficulty_mult"] = rmult
+            ai["_override_params"] = dict(ai_params)
+        gs._opp_rank = opp_rank
+        gs._rank_settled = False
+        gs.rank_settle_text = ""
+        gs.battle_log = f"排位对局 · 对手匹配: {src}"
     if load_save and not net:
         if load_game(gs):
             gs.battle_log = "读取存档成功"
@@ -9049,8 +10781,21 @@ def run_game_session(screen, clock, difficulty, font_lg, font_md, font_sm,
                         gs.multiplayer_phase = "prep"
                         gs._wait_peer_start = time.time()
 
+            if gs.game_over and rank_mode and not getattr(gs, "_rank_settled", False):
+                gs._rank_settled = True
+                _settle_rank_match(gs, rank_mode)
             if gs.game_over:
                 pass
+            if gs.game_over and not getattr(gs, "_game_recorded", False):
+                gs._game_recorded = True
+                if gs.is_multiplayer:
+                    _record_player_game(gs, "联机")
+                elif rank_mode:
+                    _record_player_game(gs, "排位")
+                elif difficulty == "nightmare":
+                    _record_player_game(gs, "噩梦")
+                else:
+                    _record_player_game(gs, "普通")
             elif getattr(gs, "show_starter_popup", False):
                 pass
             elif getattr(gs, "show_global_augment_popup", False):
@@ -9084,6 +10829,9 @@ def run_game_session(screen, clock, difficulty, font_lg, font_md, font_sm,
              lock_rect, carousel_rects, item_bench_rects,
              augment_rects, starter_rects, ga_btn,
              hover_item_idx, path_btn, go_restart, go_menu) = rects
+            if rank_mode and gs.game_over and getattr(gs, "rank_settle_text", ""):
+                draw_text(screen, gs.rank_settle_text, W // 2, H * 0.30,
+                          font_md, GOLD_COLOR, True)
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     result = "quit"
@@ -9201,6 +10949,24 @@ def run_game_session(screen, clock, difficulty, font_lg, font_md, font_sm,
                     gs._trait_scroll = max(
                         0, min(gs._trait_scroll,
                                getattr(gs, "_trait_max_scroll", 0)))
+                    continue
+
+                if event.type == pygame.MOUSEWHEEL:
+                    mx, my = pygame.mouse.get_pos()
+                    # 鼠标在底部右侧区域时，滚轮控制状态栏
+                    if my > H * 0.65 and mx > W * 0.5:
+                        gs._info_scroll_y = getattr(gs, "_info_scroll_y", 0) - event.y * 20
+                        continue
+
+                # 触屏/鼠标拖动：羁绊弹窗垂直滚动（手机触屏无滚轮，靠拖动）
+                if event.type == pygame.MOUSEMOTION and gs.show_trait_popup:
+                    drag = getattr(gs, "_trait_drag_start", None)
+                    if drag and event.buttons[0]:
+                        sx, sy, sscroll = drag
+                        dy = event.pos[1] - sy
+                        gs._trait_scroll = max(
+                            0, min(sscroll - dy,
+                                   getattr(gs, "_trait_max_scroll", 0)))
                     continue
 
                 if gs.game_over:
@@ -9469,8 +11235,15 @@ def run_game_session(screen, clock, difficulty, font_lg, font_md, font_sm,
                                 break
                         continue
                     if gs.show_trait_popup:
-                        gs.show_trait_popup = False
-                        play_sfx("click")
+                        # 点击弹窗内：进入拖动滚动（不关闭）；点击弹窗外：关闭
+                        _tp_rect = getattr(gs, "_trait_popup_rect", None)
+                        if _tp_rect and _tp_rect.collidepoint(mx, my):
+                            gs._trait_drag_start = (mx, my,
+                                                    getattr(gs, "_trait_scroll", 0))
+                        else:
+                            gs.show_trait_popup = False
+                            gs._trait_drag_start = None
+                            play_sfx("click")
                         continue
                     if gs.show_odds_popup:
                         gs.show_odds_popup = False
@@ -9636,6 +11409,8 @@ def run_game_session(screen, clock, difficulty, font_lg, font_md, font_sm,
                                 gs.buy_champ(sid)
                                 break
                 if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+                    # 结束羁绊弹窗拖动滚动
+                    gs._trait_drag_start = None
                     if gs.dragging_item is not None:
                         mx, my = event.pos
                         moved = False
@@ -9910,6 +11685,7 @@ def _thunder_skill(unit, allies, enemies, effect_list):
 
 
 def main():
+    global _TRAINING_GIVE_WAY
     pygame.init()
     info = pygame.display.Info()
     if info.current_w > info.current_h and info.current_w >= 900:
@@ -9922,13 +11698,14 @@ def main():
     pygame.display.set_caption("豹药宇宙")
     clock = pygame.time.Clock()
     _find_cjk_font()
-    font_title = get_font(64)
-    font_lg = get_font(30)
-    font_md = get_font(22)
-    font_sm = get_font(16)
-    font_dmg = get_font(26)
+    font_title = get_font(76)
+    font_lg = get_font(36)
+    font_md = get_font(28)
+    font_sm = get_font(22)
+    font_dmg = get_font(34)
     scene = "menu"
     difficulty = "normal"
+    nightmare_mode = False  # 挑战最强AI对局标志：只影响当次对局，不改变主菜单难度
     running = True
 
     net = None
@@ -9944,6 +11721,9 @@ def main():
     update_status = ""
     update_popup_open = False
     update_lock = threading.Lock()
+    train_popup_open = False
+    train_stop_event = threading.Event()
+    rank_match_rank = None
 
     def _do_check_update():
         nonlocal update_check_state, update_info, update_status
@@ -9969,13 +11749,22 @@ def main():
         mouse_pos = pygame.mouse.get_pos()
         dt = clock.tick(FPS) / 1000
         tick_sfx_cooldown(dt)
+        # 前台打对局时让训练线程让步，保证游玩流畅；菜单/设置时训练全速
+        _TRAINING_GIVE_WAY = (scene == "game")
         if scene == "menu":
             set_dbg("场景: 主菜单")
-            continue_btn, start_btn, multi_btn, update_btn, settings_btn, quit_btn = \
-                draw_main_menu(
-                    screen, font_title, font_lg, font_md, font_sm, W, H,
-                    mouse_pos, difficulty)
+            (continue_btn, start_btn, multi_btn, rank_btn, challenge_btn,
+             update_btn, train_btn, settings_btn, quit_btn) = draw_main_menu(
+                screen, font_title, font_lg, font_md, font_sm, W, H,
+                mouse_pos, difficulty)
+            # 训练线程存活检测：避免“显示训练中但实际已死”卡住界面
+            _check_training_worker()
             upd_close = upd_apply = None
+            train_btn_primary = train_btn_secondary = None
+            if train_popup_open:
+                train_btn_primary, train_btn_secondary = draw_training_popup(
+                    screen, font_lg, font_md, font_sm, W, H, mouse_pos,
+                    _TRAINING_STATE)
             if update_popup_open:
                 with update_lock:
                     _info = update_info
@@ -9986,6 +11775,31 @@ def main():
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
+                if train_popup_open:
+                    if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                        train_popup_open = False
+                    elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                        mx, my = event.pos
+                        if train_btn_primary and train_btn_primary.collidepoint(mx, my):
+                            if _TRAINING_STATE.get("running", False):
+                                # 停止训练
+                                train_stop_event.set()
+                                play_sfx("click")
+                            else:
+                                # 开始/继续训练（有存档则自动续上上次进度）
+                                train_stop_event.clear()
+                                _TRAINING_STATE["running"] = True
+                                t = threading.Thread(
+                                    target=_training_worker,
+                                    args=(train_stop_event,), daemon=True)
+                                _TRAINING_STATE["worker_thread"] = t
+                                t.start()
+                                play_sfx("buy")
+                        elif train_btn_secondary and train_btn_secondary.collidepoint(mx, my):
+                            # 训练中=隐藏窗口(后台继续)；已停止=关闭弹窗
+                            train_popup_open = False
+                            play_sfx("click")
+                    continue
                 if update_popup_open:
                     if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                         update_popup_open = False
@@ -10027,8 +11841,21 @@ def main():
                         port_input = "5555"
                         status_msg = ""
                         scene = "lobby"
+                    elif rank_btn.collidepoint(mx, my):
+                        play_sfx("buy")
+                        # 先进入排位赛专属页面，由页面内「开始对战」进入排位对局
+                        scene = "rank_page"
+                    elif challenge_btn.collidepoint(mx, my):
+                        play_sfx("buy")
+                        # 挑战最强AI：专属页面 → 噩梦模式（7名对手全为最强AI）
+                        scene = "challenge_page"
+                    elif train_btn.collidepoint(mx, my):
+                        play_sfx("click")
+                        update_popup_open = False
+                        train_popup_open = True
                     elif update_btn.collidepoint(mx, my):
                         play_sfx("click")
+                        train_popup_open = False
                         update_popup_open = True
                         with update_lock:
                             update_info = None
@@ -10047,6 +11874,45 @@ def main():
                         scene = "settings"
                     elif quit_btn.collidepoint(mx, my):
                         running = False
+            pygame.display.flip()
+        elif scene == "rank_page":
+            set_dbg("场景: 排位赛")
+            rk_start, rk_back = draw_rank_page(
+                screen, font_title, font_lg, font_md, font_sm, W, H,
+                mouse_pos)
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    running = False
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    mx, my = event.pos
+                    if rk_start and rk_start.collidepoint(mx, my):
+                        play_sfx("buy")
+                        rank_match_rank = RANK_STATE["rank"]
+                        want_load = False
+                        scene = "game"
+                    elif rk_back and rk_back.collidepoint(mx, my):
+                        play_sfx("click")
+                        scene = "menu"
+            pygame.display.flip()
+        elif scene == "challenge_page":
+            set_dbg("场景: 挑战最强AI")
+            cg_start, cg_back = draw_challenge_page(
+                screen, font_title, font_lg, font_md, font_sm, W, H,
+                mouse_pos)
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    running = False
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    mx, my = event.pos
+                    if cg_start and cg_start.collidepoint(mx, my):
+                        play_sfx("buy")
+                        nightmare_mode = True
+                        rank_match_rank = None
+                        want_load = False
+                        scene = "game"
+                    elif cg_back and cg_back.collidepoint(mx, my):
+                        play_sfx("click")
+                        scene = "menu"
             pygame.display.flip()
         elif scene == "settings":
             set_dbg("场景: 设置")
@@ -10196,11 +12062,16 @@ def main():
             pygame.display.flip()
         elif scene == "game":
             set_dbg("场景: 游戏")
-            result = run_game_session(screen, clock, difficulty,
-                                       font_lg, font_md, font_sm, font_dmg,
-                                       net=net, is_host=is_host,
-                                       load_save=want_load)
+            result = run_game_session(
+                screen, clock,
+                "nightmare" if nightmare_mode else difficulty,
+                font_lg, font_md, font_sm, font_dmg,
+                net=net, is_host=is_host,
+                load_save=want_load,
+                rank_mode=({"rank": rank_match_rank}
+                           if rank_match_rank else None))
             want_load = False
+            nightmare_mode = False
             if net:
                 net.close()
                 net = None
@@ -10208,8 +12079,10 @@ def main():
                 running = False
             elif result == "restart":
                 pass
-            elif result == "menu":
-                scene = "menu"
+            else:
+                rank_match_rank = None
+                if result == "menu":
+                    scene = "menu"
     pygame.quit()
 
 
